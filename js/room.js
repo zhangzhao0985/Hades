@@ -196,9 +196,9 @@ class Room {
     }
   }
 
-  // 房间中央的类型标记（淡）
+  // 房间中央的类型标记（淡）；仅精英/商店/Boss 显示
   _drawTypeMark(ctx) {
-    if (this.type === 'normal' || this.type === 'start') return;
+    if (this.type !== 'elite' && this.type !== 'shop' && this.type !== 'boss') return;
     const P = Config.Palette;
     const cx = this.centerX(), cy = this.centerY();
     let label = '', color = P.textLight;

@@ -105,25 +105,54 @@ const Config = {
     transitionTime: 0.55    // 镜头平移/过门时长
   },
 
-  // 各类房间的敌人数量（精英/Boss 暂用近战怪占位，真身在第五步）
-  roomEnemies: {
-    normal: [3, 5],
-    elite: [5, 7],
-    boss: [7, 7]
+  // 单一竞技场（放大约 5×，无房间切换）
+  arena: {
+    width: 3600,
+    height: 3200,
+    wallThickness: 40
   },
 
-  // 敌人
+  // 刷怪导演：普通怪持续补充，精英/Boss 不定时随机刷新
+  spawn: {
+    normalCap: 12,
+    normalIntervalMin: 2.2,
+    normalIntervalMax: 3.8,
+    normalBatchMin: 1,
+    normalBatchMax: 2,
+    initialNormals: 5,
+    eliteIntervalMin: 16,
+    eliteIntervalMax: 26,
+    eliteCap: 2,
+    bossIntervalMin: 45,
+    bossIntervalMax: 70,
+    edgeMargin: 120,
+    safeDist: 360
+  },
+
+  // 敌人（普通 / 精英 / Boss）
   enemy: {
-    maxOnScreen: 16,
+    maxOnScreen: 18,        // 非 Boss 同屏硬上限
     melee: {
-      radius: 26,
-      speed: 152,
-      maxHp: 40,
-      contactDamage: 12,
-      contactCooldown: 0.9,
-      spawnTime: 0.5,        // 生成（破土）时长
-      knockbackDecay: 7,     // 被击退后的速度衰减
-      hitstunMin: 0.18
+      radius: 26, speed: 152, maxHp: 40,
+      contactDamage: 12, contactCooldown: 0.9,
+      spawnTime: 0.5, knockbackDecay: 7, hitstunMin: 0.18,
+      knockbackResist: 1, stunnable: true
+    },
+    elite: {
+      radius: 38, speed: 138, maxHp: 160,
+      contactDamage: 20, contactCooldown: 1.0,
+      spawnTime: 0.7, knockbackDecay: 6, hitstunMin: 0.12,
+      knockbackResist: 0.5, stunnable: true
+    },
+    boss: {
+      radius: 72, speed: 96, maxHp: 1200,
+      contactDamage: 26, contactCooldown: 0.8,
+      spawnTime: 1.0, knockbackDecay: 6, hitstunMin: 0,
+      knockbackResist: 0.12, stunnable: false,
+      chargeRange: 560, chargeCdMin: 3.5, chargeCdMax: 5.5,
+      telegraphTime: 0.7, chargeSpeed: 780, chargeTime: 0.5,
+      recoverTime: 0.9, chargeDamageMul: 1.7,
+      phase2SpeedMul: 1.25, phase2CdMul: 0.6
     }
   },
 
