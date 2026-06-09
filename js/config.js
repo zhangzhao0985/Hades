@@ -129,15 +129,15 @@ const Config = {
 
   // 刷怪导演：普通怪持续补充，精英/Boss 不定时随机刷新
   spawn: {
-    normalCap: 12,
-    normalIntervalMin: 2.2,
-    normalIntervalMax: 3.8,
-    normalBatchMin: 1,
-    normalBatchMax: 2,
-    initialNormals: 5,
-    eliteIntervalMin: 16,
-    eliteIntervalMax: 26,
-    eliteCap: 2,
+    normalCap: 20,
+    normalIntervalMin: 1.6,
+    normalIntervalMax: 2.8,
+    normalBatchMin: 2,
+    normalBatchMax: 4,
+    initialNormals: 9,
+    eliteIntervalMin: 14,
+    eliteIntervalMax: 24,
+    eliteCap: 3,
     bossIntervalMin: 45,
     bossIntervalMax: 70,
     edgeMargin: 120,
@@ -146,7 +146,7 @@ const Config = {
 
   // 敌人（普通 / 精英 / Boss）
   enemy: {
-    maxOnScreen: 18,        // 非 Boss 同屏硬上限
+    maxOnScreen: 30,        // 非 Boss 同屏硬上限
     melee: {
       radius: 26, speed: 152, maxHp: 40,
       contactDamage: 12, contactCooldown: 0.9,

@@ -1,6 +1,7 @@
 // js/player.js —— 玩家：移动、武器驱动的普攻、特殊技、闪避、神怒能量、受击
 const Config = require('./config.js');
 const { WEAPONS } = require('./weapons.js');
+const { drawCharacter, SKINS } = require('./sprites.js');
 const { clamp, len, damp } = require('./utils.js');
 
 class Player {
@@ -228,71 +229,49 @@ class Player {
     const r = this.radius;
     const P = Config.Palette;
 
-    // 阴影
-    ctx.save();
-    ctx.translate(this.x, this.y + r * 0.72);
-    ctx.scale(1, 0.5);
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.95, 0, Math.PI * 2);
-    ctx.fillStyle = P.shadow;
-    ctx.fill();
-    ctx.restore();
-
-    // 走动时不再上下晃动（保持平稳）
-    const cy = this.y;
-
     let alpha = 1;
     if (this.invuln > 0) {
-      alpha = this.dashing ? 0.85 : (0.35 + 0.5 * Math.abs(Math.sin(this.invuln * 28)));
+      alpha = this.dashing ? 0.9 : (0.4 + 0.5 * Math.abs(Math.sin(this.invuln * 28)));
     }
 
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
+    // 闪避光环
     if (this.dashing) {
+      ctx.save();
+      ctx.globalAlpha = 0.8;
       ctx.beginPath();
-      ctx.arc(this.x, cy, r + 6, 0, Math.PI * 2);
+      ctx.arc(this.x, this.y, r + 8, 0, Math.PI * 2);
       ctx.strokeStyle = P.olympusBlueLight;
       ctx.lineWidth = 3;
       ctx.stroke();
+      ctx.restore();
     }
 
     // 远程武器：朝向瞄准线
     if (this.weapon.type === 'ranged') {
       const fx = Math.cos(this.facing), fy = Math.sin(this.facing);
+      ctx.save();
       ctx.strokeStyle = this.weapon.color;
-      ctx.globalAlpha = alpha * 0.5;
+      ctx.globalAlpha = alpha * 0.4;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(this.x + fx * r, cy + fy * r);
-      ctx.lineTo(this.x + fx * (r + 26), cy + fy * (r + 26));
+      ctx.moveTo(this.x + fx * r, this.y + fy * r);
+      ctx.lineTo(this.x + fx * (r + 30), this.y + fy * (r + 30));
       ctx.stroke();
-      ctx.globalAlpha = alpha;
+      ctx.restore();
     }
 
-    const grad = ctx.createRadialGradient(this.x - r * 0.3, cy - r * 0.4, r * 0.2, this.x, cy, r);
-    grad.addColorStop(0, P.bloodRedLight);
-    grad.addColorStop(1, P.bloodRed);
-    ctx.beginPath();
-    ctx.arc(this.x, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = P.olympusGold;
-    ctx.stroke();
-
-    // 朝向三角
-    const fx = Math.cos(this.facing), fy = Math.sin(this.facing);
-    const px = -fy, py = fx;
-    ctx.beginPath();
-    ctx.moveTo(this.x + fx * (r + 12), cy + fy * (r + 12));
-    ctx.lineTo(this.x + fx * r * 0.55 + px * 10, cy + fy * r * 0.55 + py * 10);
-    ctx.lineTo(this.x + fx * r * 0.55 - px * 10, cy + fy * r * 0.55 - py * 10);
-    ctx.closePath();
-    ctx.fillStyle = P.olympusGoldLight;
-    ctx.fill();
-
-    ctx.restore();
+    drawCharacter(ctx, {
+      x: this.x, y: this.y, r,
+      facing: this.facing,
+      walk: this.animTime,
+      moving: this.moving,
+      colors: SKINS.player,
+      feature: 'laurel',
+      glowEyes: false,
+      sash: true,
+      weapon: this.weapon.type === 'ranged' ? 'bow' : 'sword',
+      alpha
+    });
   }
 }
 

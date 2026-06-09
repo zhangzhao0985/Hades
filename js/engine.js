@@ -968,10 +968,13 @@ class Game {
     const r = c.rect;
     const def = c.def;
     const g = GODS[def.god];
+    // 指定金色的祝福（如「惊涛裂岸」「冥王之力」）用金色描边与文案
+    const accent = def.gold ? P.olympusGold : g.accent;
+    const titleColor = def.gold ? P.olympusGoldLight : g.color;
     ctx.fillStyle = 'rgba(24,14,38,0.96)';
     ctx.fillRect(r.x, r.y, r.w, r.h);
     ctx.lineWidth = 2.5;
-    ctx.strokeStyle = g.accent;
+    ctx.strokeStyle = accent;
     ctx.strokeRect(r.x, r.y, r.w, r.h);
     const badgeX = r.x + 40, badgeY = r.y + r.h / 2;
     ctx.beginPath();
@@ -979,9 +982,9 @@ class Game {
     ctx.fillStyle = 'rgba(10,6,18,0.9)';
     ctx.fill();
     ctx.lineWidth = 2.5;
-    ctx.strokeStyle = g.accent;
+    ctx.strokeStyle = accent;
     ctx.stroke();
-    ctx.fillStyle = g.color;
+    ctx.fillStyle = titleColor;
     ctx.font = 'bold 24px serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -989,13 +992,13 @@ class Game {
     const tx = r.x + 78;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = g.color;
+    ctx.fillStyle = titleColor;
     ctx.font = 'bold 19px serif';
     ctx.fillText(def.name + '  Lv.' + c.nextLevel, tx, r.y + 16);
-    ctx.fillStyle = 'rgba(243,233,210,0.55)';
+    ctx.fillStyle = def.gold ? 'rgba(245,197,66,0.7)' : 'rgba(243,233,210,0.55)';
     ctx.font = '12px sans-serif';
     ctx.fillText(g.name + ' · ' + def.slot, tx, r.y + 40);
-    ctx.fillStyle = P.textLight;
+    ctx.fillStyle = def.gold ? P.olympusGoldLight : P.textLight;
     ctx.font = '13px sans-serif';
     const lines = this._wrapText(ctx, def.desc(c.nextLevel), r.w - 92);
     for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], tx, r.y + 62 + i * 18);

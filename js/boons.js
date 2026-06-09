@@ -18,7 +18,7 @@ const BOON_DEFS = [
     desc: (lv) => `命中时引发连锁闪电，跳跃 ${1 + lv} 次，每次 ${8 + lv * 4} 点伤害`
   },
   {
-    id: 'poseidon_strike', god: 'poseidon', name: '惊涛裂岸', short: '涛', slot: '普攻', maxLevel: 3,
+    id: 'poseidon_strike', god: 'poseidon', name: '惊涛裂岸', short: '涛', slot: '普攻', maxLevel: 3, gold: true,
     desc: (lv) => `攻击击退大幅增强，并附加 ${6 + lv * 4} 点撞击伤害`
   },
   {
@@ -38,7 +38,7 @@ const BOON_DEFS = [
     desc: (lv) => `最大生命 +${25 * lv}（获得时回复等量生命）`
   },
   {
-    id: 'styx_strength', god: 'styx', name: '冥王之力', short: '力', slot: '被动', maxLevel: 4,
+    id: 'styx_strength', god: 'styx', name: '冥王之力', short: '力', slot: '被动', maxLevel: 4, gold: true,
     desc: (lv) => `普通攻击伤害 +${6 * lv}`
   },
   {

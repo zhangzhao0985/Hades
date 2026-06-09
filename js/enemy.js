@@ -2,6 +2,7 @@
 // 状态机：spawn → (chase | telegraph | charge | recover) ↔ hurt → dead
 // Boss 不进入 hurt 硬直，拥有蓄力冲锋技能与二阶段。
 const Config = require('./config.js');
+const { drawCharacter, SKINS } = require('./sprites.js');
 const { clamp, len, damp } = require('./utils.js');
 
 let _eid = 0;
@@ -225,31 +226,42 @@ class Enemy {
   }
 
   // ---- 绘制 ----
+  _feature() { return this.kind === 'elite' ? 'horns' : (this.kind === 'boss' ? 'crown' : null); }
+  _colors() { return SKINS[this.kind] || SKINS.melee; }
+
   draw(ctx) {
+    const colors = this._colors();
+    const feature = this._feature();
+
     if (this.state === 'dead') {
       const t = clamp(this.deadTimer / (this.isBoss() ? 0.7 : 0.35), 0, 1);
-      ctx.globalAlpha = t;
-      this._drawBody(ctx, this.radius * (0.6 + 0.4 * t));
-      ctx.globalAlpha = 1;
+      drawCharacter(ctx, {
+        x: this.x, y: this.y, r: this.radius * (0.6 + 0.4 * t),
+        facing: this.facing, walk: this.animTime, moving: false,
+        colors, feature, glowEyes: true, alpha: t
+      });
       return;
     }
 
-    let scale = 1;
+    let scale = 1, alpha = 1;
     if (this.state === 'spawn') {
       const t = 1 - clamp(this.spawnTimer / this.stats.spawnTime, 0, 1);
-      scale = 0.2 + 0.8 * t;
-      ctx.globalAlpha = t;
+      scale = 0.3 + 0.7 * t;
+      alpha = t;
     }
 
     if (this.kind === 'boss' && this.state === 'telegraph') this._drawTelegraph(ctx);
     if (this.kind === 'boss' && this.state === 'charge') this._drawChargeTrail(ctx);
 
-    this._drawBody(ctx, this.radius * scale);
-    ctx.globalAlpha = 1;
+    const moving = this.state === 'chase' || this.state === 'charge';
+    drawCharacter(ctx, {
+      x: this.x, y: this.y, r: this.radius * scale,
+      facing: this.facing, walk: this.animTime, moving,
+      colors, feature, glowEyes: true, alpha
+    });
 
     if (this.state !== 'spawn') {
       this._drawStatus(ctx);
-      // Boss 用屏幕顶部血条（引擎绘制），其余用头顶血条
       if (!this.isBoss() && this.hp < this.maxHp) this._drawHpBar(ctx);
     }
   }
@@ -279,63 +291,6 @@ class Enemy {
       ctx.fill();
     }
     ctx.restore();
-  }
-
-  _drawBody(ctx, r) {
-    const P = Config.Palette;
-
-    // 阴影
-    ctx.save();
-    ctx.translate(this.x, this.y + r * 0.7);
-    ctx.scale(1, 0.5);
-    ctx.beginPath();
-    ctx.arc(0, 0, r * 0.9, 0, Math.PI * 2);
-    ctx.fillStyle = P.shadow;
-    ctx.fill();
-    ctx.restore();
-
-    const bob = Math.sin(this.animTime) * 2;
-    const cy = this.y + bob;
-    const flash = this.hpFlash > 0;
-
-    // Boss / 精英的尖刺冠
-    if (this.kind !== 'melee') {
-      ctx.fillStyle = flash ? '#ffffff' : this.col.body;
-      const spikes = this.kind === 'boss' ? 9 : 6;
-      ctx.beginPath();
-      for (let i = 0; i < spikes; i++) {
-        const a = (i / spikes) * Math.PI * 2 + this.animTime * 0.2;
-        ctx.moveTo(this.x, cy);
-        ctx.lineTo(this.x + Math.cos(a) * r * 1.35, cy + Math.sin(a) * r * 1.35);
-        ctx.lineTo(this.x + Math.cos(a + 0.3) * r * 0.9, cy + Math.sin(a + 0.3) * r * 0.9);
-      }
-      ctx.fill();
-    }
-
-    const grad = ctx.createRadialGradient(this.x - r * 0.3, cy - r * 0.4, r * 0.2, this.x, cy, r);
-    grad.addColorStop(0, flash ? '#ffffff' : this.col.light);
-    grad.addColorStop(1, flash ? '#ffd0d0' : this.col.body);
-    ctx.beginPath();
-    ctx.arc(this.x, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = grad;
-    ctx.fill();
-    ctx.lineWidth = this.isBoss() ? 3 : 2;
-    ctx.strokeStyle = this.isBoss() ? P.olympusGold : 'rgba(0,0,0,0.4)';
-    ctx.stroke();
-
-    // 眼睛
-    const fx = Math.cos(this.facing), fy = Math.sin(this.facing);
-    const px = -fy, py = fx;
-    const ex = this.x + fx * r * 0.32;
-    const ey = cy + fy * r * 0.32;
-    const er = r * 0.12;
-    ctx.fillStyle = P.enemyEye;
-    ctx.beginPath();
-    ctx.arc(ex + px * r * 0.26, ey + py * r * 0.26, er, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(ex - px * r * 0.26, ey - py * r * 0.26, er, 0, Math.PI * 2);
-    ctx.fill();
   }
 
   _drawStatus(ctx) {
