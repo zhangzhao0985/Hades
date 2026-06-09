@@ -4,6 +4,9 @@
 node_modules/
 *.log
 
+# 工具在本机生成的私有配置（每台机器各自维护，不入库）
+project.private.config.json
+
 # 系统文件
 .DS_Store
 Thumbs.db
