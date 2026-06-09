@@ -24,6 +24,8 @@ class Effect {
     this.half = o.half || 0.6;
     this.color = o.color || Config.Palette.slash;
     this.text = o.text != null ? String(o.text) : '';
+    this.x2 = o.x2 != null ? o.x2 : this.x;
+    this.y2 = o.y2 != null ? o.y2 : this.y;
   }
 
   update(dt) {
@@ -41,7 +43,34 @@ class Effect {
       case 'death': this._death(ctx, p); break;
       case 'dmg': this._dmg(ctx, p); break;
       case 'dashtrail': this._dash(ctx, p); break;
+      case 'lightning': this._lightning(ctx, p); break;
     }
+  }
+
+  // 连锁闪电：抖动的折线 + 辉光
+  _lightning(ctx, p) {
+    const segs = 6;
+    const nx = -(this.y2 - this.y);
+    const ny = (this.x2 - this.x);
+    const nl = Math.sqrt(nx * nx + ny * ny) || 1;
+    ctx.save();
+    for (let pass = 0; pass < 2; pass++) {
+      ctx.globalAlpha = (1 - p) * (pass === 0 ? 0.5 : 1);
+      ctx.strokeStyle = pass === 0 ? this.color : '#ffffff';
+      ctx.lineWidth = pass === 0 ? 6 * (1 - p) + 1 : 2;
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y);
+      for (let i = 1; i < segs; i++) {
+        const t = i / segs;
+        const mx = this.x + (this.x2 - this.x) * t;
+        const my = this.y + (this.y2 - this.y) * t;
+        const off = (Math.random() * 2 - 1) * 16;
+        ctx.lineTo(mx + nx / nl * off, my + ny / nl * off);
+      }
+      ctx.lineTo(this.x2, this.y2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // 扇形挥砍：随时间扫开并淡出

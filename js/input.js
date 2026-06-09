@@ -21,8 +21,9 @@ class InputManager {
     // 右侧动作按钮
     this.buttons = this._layoutButtons(cssW, cssH);
 
-    // 通用「本帧是否有新触摸」标记（用于死亡界面轻触重开）
+    // 通用「本帧是否有新触摸」标记（用于死亡/祝福界面）
     this._tapped = false;
+    this._tapPos = { x: 0, y: 0 };
   }
 
   resize(cssW, cssH) {
@@ -53,6 +54,7 @@ class InputManager {
       const t = touches[i];
       const p = this._point(t);
       this._tapped = true;
+      this._tapPos = { x: p.x, y: p.y };
 
       // 先判定动作按钮，命中则占用该触点
       if (this._tryPressButton(t, p)) continue;
@@ -140,6 +142,27 @@ class InputManager {
       return true;
     }
     return false;
+  }
+
+  // 祝福选择：取出本帧点击坐标（无则返回 null）
+  consumeTap() {
+    if (this._tapped) {
+      this._tapped = false;
+      return { x: this._tapPos.x, y: this._tapPos.y };
+    }
+    return null;
+  }
+
+  // 复位全部输入（进入/退出遮罩界面时调用，避免触点残留）
+  resetAll() {
+    this._resetJoystick();
+    for (const k in this.buttons) {
+      const b = this.buttons[k];
+      b.pressed = false;
+      b.justPressed = false;
+      b.touchId = null;
+    }
+    this._tapped = false;
   }
 
   _updateVector() {

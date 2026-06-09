@@ -8,6 +8,7 @@ const Camera = require('./camera.js');
 const Enemy = require('./enemy.js');
 const EffectsManager = require('./effects.js');
 const Dungeon = require('./dungeon.js');
+const { BoonManager, GODS } = require('./boons.js');
 const { clamp, len, dist } = require('./utils.js');
 
 const EDGE_DELTA = { N: [0, -1], E: [1, 0], S: [0, 1], W: [-1, 0] };
@@ -38,8 +39,10 @@ class Game {
     this.camera.setViewport(this.viewWorldW, this.viewWorldH);
 
     this.enemies = [];
+    this.boons = new BoonManager();
+    this.boonChoices = null;
     this.shake = 0;
-    this.state = 'playing';   // playing | dead
+    this.state = 'playing';   // playing | boon | dead
     this.deathPromptT = 0;
 
     this._initRun();
@@ -67,6 +70,9 @@ class Game {
     this.canTriggerDoor = true;
     this.clearFlashT = 0;
     this.shake = 0;
+
+    this.boons.reset();
+    this.boonChoices = null;
 
     this.player.reset(this.currentRoom.centerX(), this.currentRoom.centerY());
     this.camera.snapTo(this.player, this.currentRoom);
@@ -138,6 +144,17 @@ class Game {
       return;
     }
 
+    if (this.state === 'boon') {
+      this.effects.update(dt);
+      const tap = this.input.consumeTap();
+      if (tap) {
+        for (const c of this.boonChoices) {
+          if (this._pointInRect(tap, c.rect)) { this._applyBoon(c.def.id); break; }
+        }
+      }
+      return;
+    }
+
     if (this.transition) { this._updateTransition(dt); return; }
 
     if (this.clearFlashT > 0) this.clearFlashT -= dt;
@@ -168,6 +185,7 @@ class Game {
       this.enemies[i].update(dt, this.player, this.currentRoom);
     }
     this._separateEnemies();
+    this._updateStatusEffects(dt);
     this._resolvePlayerAttack();
     this._resolveEnemyContact();
 
@@ -284,13 +302,59 @@ class Game {
     if (room.isCombat() && room.spawned && !room.cleared && this._aliveEnemies() === 0) {
       room.cleared = true;
       this.clearFlashT = 2.4;
+      this._openBoonSelection();
     }
+  }
+
+  // 清场后弹出三选一祝福
+  _openBoonSelection() {
+    const choices = this.boons.getChoices(3);
+    if (choices.length === 0) return; // 已全部满级
+    this.boonChoices = this._layoutBoonCards(choices);
+    this.state = 'boon';
+    this.input.resetAll();
+  }
+
+  _layoutBoonCards(choices) {
+    const cw = this.cssW, ch = this.cssH;
+    const cardW = Math.min(cw - 56, 360);
+    const cardH = 132;
+    const gap = 18;
+    const total = choices.length * cardH + (choices.length - 1) * gap;
+    const startY = (ch - total) / 2 + 20;
+    const x = (cw - cardW) / 2;
+    return choices.map((c, i) => ({
+      def: c.def,
+      nextLevel: c.nextLevel,
+      rect: { x, y: startY + i * (cardH + gap), w: cardW, h: cardH }
+    }));
+  }
+
+  _applyBoon(id) {
+    const prevMaxHp = this.player.maxHp;
+    this.boons.add(id);
+    const m = this.boons.mods;
+    this.player.maxHp = Config.player.maxHp + m.bonusMaxHp;
+    this.player.maxStamina = Config.player.maxStamina + m.bonusMaxStamina;
+    const heal = this.player.maxHp - prevMaxHp;
+    if (heal > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
+
+    // 获得祝福的金色光环
+    this.effects.spawn('death', { x: this.player.x, y: this.player.y, dur: 0.5, color: Config.Palette.olympusGoldLight });
+    this.boonChoices = null;
+    this.state = 'playing';
+    this.input.resetAll();
+  }
+
+  _pointInRect(p, r) {
+    return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
   }
 
   // ---- 战斗结算 ----
   _resolvePlayerAttack() {
     const hb = this.player.getAttackHitbox();
     if (!hb) return;
+    const m = this.boons.mods;
     for (let i = 0; i < this.enemies.length; i++) {
       const en = this.enemies[i];
       if (!en.isAlive()) continue;
@@ -303,13 +367,25 @@ class Game {
       const ang = Math.atan2(dy, dx);
       if (Math.abs(this._angleDiff(ang, hb.facing)) > hb.halfAngle) continue;
 
+      // 祝福加成：冥王之力(+伤)、波塞冬(撞击+击退)
+      let dmg = hb.damage + m.bonusAttackDamage;
+      let kb = hb.knockback;
+      if (m.poseidon.active) { dmg += m.poseidon.impactDamage; kb *= m.poseidon.knockbackMul; }
+
       en.lastHitSwingId = hb.swingId;
       const wasAlive = en.isAlive();
-      en.takeDamage(hb.damage, hb.x, hb.y, hb.knockback, hb.hitstun);
+      en.takeDamage(dmg, hb.x, hb.y, kb, hb.hitstun);
+
+      // 阿瑞斯流血 / 阿芙洛狄忒虚弱
+      if (m.ares.active) en.applyBleed(m.ares.dps, m.ares.duration);
+      if (m.aphrodite.active) en.applyWeak(m.aphrodite.weakMul, m.aphrodite.duration);
 
       this.effects.spawn('hit', { x: en.x, y: en.y, angle: ang, dur: 0.22, color: Config.Palette.spark });
-      this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: Math.round(hb.damage), vy: -70, dur: 0.6, color: Config.Palette.olympusGoldLight });
+      this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: Math.round(dmg), vy: -70, dur: 0.6, color: Config.Palette.olympusGoldLight });
       this.addShake(0.16);
+
+      // 宙斯连锁闪电
+      if (m.zeus.active) this._chainLightning(en, m.zeus);
 
       if (wasAlive && en.state === 'dead') {
         this.effects.spawn('death', { x: en.x, y: en.y, dur: 0.35, color: Config.Palette.spark });
@@ -318,15 +394,77 @@ class Game {
     }
   }
 
+  // 宙斯：从命中目标向邻近敌人跳跃放电
+  _chainLightning(source, z) {
+    const hitSet = { [source.id]: true };
+    let from = source;
+    for (let j = 0; j < z.jumps; j++) {
+      let best = null, bestD = z.range;
+      for (let i = 0; i < this.enemies.length; i++) {
+        const e = this.enemies[i];
+        if (!e.isAlive() || hitSet[e.id]) continue;
+        const dd = dist(from.x, from.y, e.x, e.y);
+        if (dd < bestD) { bestD = dd; best = e; }
+      }
+      if (!best) break;
+      hitSet[best.id] = true;
+      this.effects.spawn('lightning', { x: from.x, y: from.y, x2: best.x, y2: best.y, dur: 0.18, color: Config.Palette.olympusBlueLight });
+      const wasAlive = best.isAlive();
+      best.takeDamage(z.damage, from.x, from.y, 40, 0.05);
+      this.effects.spawn('dmg', { x: best.x, y: best.y - best.radius - 6, text: Math.round(z.damage), vy: -60, dur: 0.5, color: Config.Palette.olympusBlueLight });
+      if (wasAlive && best.state === 'dead') {
+        this.effects.spawn('death', { x: best.x, y: best.y, dur: 0.35, color: Config.Palette.olympusBlue });
+      }
+      from = best;
+    }
+  }
+
+  // 流血/虚弱状态推进
+  _updateStatusEffects(dt) {
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i];
+      if (!e.isAlive()) continue;
+      if (e.bleedTimer > 0) {
+        e._bleedTick = (e._bleedTick || 0) + dt;
+        if (e._bleedTick >= 0.3) {
+          e._bleedTick = 0;
+          this.effects.spawn('dmg', { x: e.x + (Math.random() * 16 - 8), y: e.y - e.radius, text: '·', vy: -28, dur: 0.4, color: Config.Palette.bloodRedLight });
+        }
+      }
+      if (e.updateStatus(dt)) {
+        this.effects.spawn('death', { x: e.x, y: e.y, dur: 0.35, color: Config.Palette.bloodRedLight });
+        this.addShake(0.22);
+      }
+    }
+  }
+
   _resolveEnemyContact() {
+    const m = this.boons.mods;
     for (let i = 0; i < this.enemies.length; i++) {
       const en = this.enemies[i];
-      if (!en.canDamagePlayer()) continue;
       const dx = this.player.x - en.x;
       const dy = this.player.y - en.y;
       const d = len(dx, dy);
-      if (d <= this.player.radius + en.radius) {
-        if (this.player.takeDamage(Config.enemy.melee.contactDamage, en.x, en.y)) {
+      if (d > this.player.radius + en.radius) continue;
+
+      // 雅典娜：闪避无敌中撞击敌人 → 击退并造成伤害
+      if (this.player.isInvincible()) {
+        if (m.athena.active && this.player.dashing && en.canBeDeflected()) {
+          en.deflectCd = 0.3;
+          const wasAlive = en.isAlive();
+          en.takeDamage(m.athena.damage, this.player.x, this.player.y, m.athena.knockback, 0.2);
+          this.effects.spawn('hit', { x: en.x, y: en.y, angle: Math.atan2(dy, dx), dur: 0.2, color: Config.Palette.olympusBlueLight });
+          this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: Math.round(m.athena.damage), vy: -60, dur: 0.5, color: Config.Palette.olympusBlueLight });
+          this.addShake(0.2);
+          if (wasAlive && en.state === 'dead') this.effects.spawn('death', { x: en.x, y: en.y, dur: 0.35, color: Config.Palette.olympusBlue });
+        }
+        continue;
+      }
+
+      // 正常接触伤害（虚弱会降低敌人伤害）
+      if (en.canDamagePlayer()) {
+        const dmg = Config.enemy.melee.contactDamage * en.weakMul;
+        if (this.player.takeDamage(dmg, en.x, en.y)) {
           en.contactCd = Config.enemy.melee.contactCooldown;
           const l = d || 1;
           en.vx = -dx / l * 120;
@@ -432,11 +570,135 @@ class Game {
   }
 
   _renderUI(ctx) {
-    this._drawJoystick(ctx);
-    this._drawActionButtons(ctx);
+    if (this.state !== 'boon') {
+      this._drawJoystick(ctx);
+      this._drawActionButtons(ctx);
+    }
     this._drawHud(ctx);
+    this._drawBoonBar(ctx);
     this.dungeon.drawMinimap(ctx, this.currentRoom, this.cssW);
+    if (this.state === 'boon') this._drawBoonOverlay(ctx);
     if (this.state === 'dead') this._drawDeathOverlay(ctx);
+  }
+
+  // 已获得祝福的 Build 图标条（HP/体力条下方）
+  _drawBoonBar(ctx) {
+    const order = this.boons.order;
+    if (order.length === 0) return;
+    const x0 = 20, y0 = 112, s = 26, gap = 6;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < order.length; i++) {
+      const id = order[i];
+      const def = this.boons.def(id);
+      const lv = this.boons.level(id);
+      const g = GODS[def.god];
+      const x = x0 + i * (s + gap);
+      // 徽章
+      ctx.beginPath();
+      ctx.arc(x + s / 2, y0 + s / 2, s / 2, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(20,12,30,0.7)';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = g.accent;
+      ctx.stroke();
+      ctx.fillStyle = g.color;
+      ctx.font = 'bold 15px serif';
+      ctx.fillText(def.short, x + s / 2, y0 + s / 2 + 1);
+      // 等级点
+      ctx.fillStyle = Config.Palette.olympusGoldLight;
+      for (let k = 0; k < lv; k++) {
+        ctx.beginPath();
+        ctx.arc(x + 4 + k * 5, y0 + s + 4, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // 文本按宽度折行（适配中文逐字测量）
+  _wrapText(ctx, text, maxW) {
+    const lines = [];
+    let line = '';
+    for (let i = 0; i < text.length; i++) {
+      const test = line + text[i];
+      if (ctx.measureText(test).width > maxW && line) {
+        lines.push(line);
+        line = text[i];
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  _drawBoonOverlay(ctx) {
+    const P = Config.Palette;
+    const cw = this.cssW, ch = this.cssH;
+    ctx.fillStyle = 'rgba(8,4,16,0.82)';
+    ctx.fillRect(0, 0, cw, ch);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = 'bold 26px serif';
+    const topY = this.boonChoices[0].rect.y - 44;
+    ctx.fillText('诸 神 的 馈 赠', cw / 2, topY);
+    ctx.fillStyle = 'rgba(243,233,210,0.6)';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('选择一项祝福（可叠加）', cw / 2, topY + 24);
+
+    for (const c of this.boonChoices) {
+      this._drawBoonCard(ctx, c);
+    }
+  }
+
+  _drawBoonCard(ctx, c) {
+    const P = Config.Palette;
+    const r = c.rect;
+    const def = c.def;
+    const g = GODS[def.god];
+
+    // 卡片背板
+    ctx.fillStyle = 'rgba(24,14,38,0.96)';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = g.accent;
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+    // 左侧神祇徽记
+    const badgeX = r.x + 40, badgeY = r.y + r.h / 2;
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, 26, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(10,6,18,0.9)';
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = g.accent;
+    ctx.stroke();
+    ctx.fillStyle = g.color;
+    ctx.font = 'bold 24px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(def.short, badgeX, badgeY + 1);
+
+    // 右侧文本
+    const tx = r.x + 78;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = g.color;
+    ctx.font = 'bold 19px serif';
+    ctx.fillText(def.name + '  Lv.' + c.nextLevel, tx, r.y + 16);
+
+    ctx.fillStyle = 'rgba(243,233,210,0.55)';
+    ctx.font = '12px sans-serif';
+    ctx.fillText(g.name + ' · ' + def.slot, tx, r.y + 40);
+
+    ctx.fillStyle = P.textLight;
+    ctx.font = '13px sans-serif';
+    const lines = this._wrapText(ctx, def.desc(c.nextLevel), r.w - 92);
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], tx, r.y + 62 + i * 18);
+    }
   }
 
   _drawJoystick(ctx) {

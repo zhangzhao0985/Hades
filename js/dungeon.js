@@ -84,27 +84,30 @@ class Dungeon {
 
   _assignTypes() {
     const dist = this._bfsDist(this.start);
-    // 死胡同（只有 1 个门）按距起点远近排序
+    // 死胡同（只有 1 个门）按距起点远近排序（远的优先当 Boss）
     const deadends = this.rooms
       .filter((r) => r !== this.start && r.doorCount() === 1)
       .sort((a, b) => dist[this.key(b.gx, b.gy)] - dist[this.key(a.gx, a.gy)]);
 
-    const used = new Set();
+    const used = new Set([this.start]);
+    const pickDeadend = () => deadends.find((x) => !used.has(x));
+    const pickFarthest = () => {
+      let best = null, bd = -1;
+      for (const r of this.rooms) {
+        if (used.has(r) || r.type !== 'normal') continue;
+        const dd = dist[this.key(r.gx, r.gy)] || 0;
+        if (dd > bd) { bd = dd; best = r; }
+      }
+      return best;
+    };
+    // 优先用死胡同，不够则退而取最远的普通房，保证商店/精英尽量出现
     const take = (type) => {
-      const r = deadends.find((x) => !used.has(x));
-      if (r) { r.type = type; r.cleared = !r.isCombat(); used.add(r); return r; }
-      return null;
+      const r = pickDeadend() || pickFarthest();
+      if (r) { r.type = type; r.cleared = !r.isCombat(); used.add(r); }
+      return r;
     };
 
-    // 最远死胡同 = Boss；否则取整体最远房间
-    if (!take('boss')) {
-      let far = this.start, fd = -1;
-      for (const r of this.rooms) {
-        const dd = dist[this.key(r.gx, r.gy)] || 0;
-        if (r !== this.start && dd > fd) { fd = dd; far = r; }
-      }
-      if (far !== this.start) { far.type = 'boss'; far.cleared = false; }
-    }
+    take('boss');
     take('shop');
     take('elite');
   }
