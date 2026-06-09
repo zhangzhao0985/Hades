@@ -1,5 +1,5 @@
-// js/engine.js —— 游戏核心：Canvas 初始化、缩放适配、固定步长主循环、渲染编排
-// （文件名避免使用 game.js，以免被微信工具误判为「小游戏」入口）
+// js/engine.js —— 游戏核心：画布初始化、缩放适配、固定步长主循环、渲染编排
+// 同时兼容小游戏（全局 requestAnimationFrame）与小程序 Canvas 2D（canvas.requestAnimationFrame）
 const Config = require('./config.js');
 const InputManager = require('./input.js');
 const Player = require('./player.js');
@@ -51,25 +51,37 @@ class Game {
     this._fpsTimer = 0;
   }
 
+  // 帧调度：小游戏用全局 requestAnimationFrame，小程序 Canvas 2D 用 canvas.requestAnimationFrame
+  _raf(cb) {
+    if (typeof requestAnimationFrame === 'function') return requestAnimationFrame(cb);
+    if (this.canvas && this.canvas.requestAnimationFrame) return this.canvas.requestAnimationFrame(cb);
+    return setTimeout(() => cb(Date.now()), 16);
+  }
+
+  _caf(id) {
+    if (id == null) return;
+    if (typeof cancelAnimationFrame === 'function') return cancelAnimationFrame(id);
+    if (this.canvas && this.canvas.cancelAnimationFrame) return this.canvas.cancelAnimationFrame(id);
+    clearTimeout(id);
+  }
+
   start() {
     if (this.running) return;
     this.running = true;
     this.lastTime = 0; // 重新计时，避免回前台后一次性大步进
     this._render();    // 立即画一帧，确保启动瞬间就有画面
-    this.rafId = this.canvas.requestAnimationFrame(this._loop);
+    this.rafId = this._raf(this._loop);
   }
 
   stop() {
     this.running = false;
-    if (this.rafId) {
-      this.canvas.cancelAnimationFrame(this.rafId);
-      this.rafId = null;
-    }
+    this._caf(this.rafId);
+    this.rafId = null;
   }
 
   _loop(timestamp) {
     if (!this.running) return;
-    this.rafId = this.canvas.requestAnimationFrame(this._loop);
+    this.rafId = this._raf(this._loop);
 
     if (!this.lastTime) this.lastTime = timestamp;
     let frameTime = (timestamp - this.lastTime) / 1000;

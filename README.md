@@ -1,21 +1,21 @@
-# Hades · 微信小程序 2D 俯视角动作 Roguelike
+# Hades · 微信小游戏 2D 俯视角动作 Roguelike
 
-对标 Supergiant Games《Hades》的触屏 Roguelike，使用微信小程序原生框架 + Canvas 2D（不依赖 WebGL）。
+对标 Supergiant Games《Hades》的触屏 Roguelike，使用 **微信小游戏** 原生框架 + Canvas 2D（不依赖 WebGL）。
 
 ## 运行方式
 
-1. 用 **微信开发者工具** 打开本项目根目录。
+1. 打开 **微信开发者工具**，选择 **新建/导入项目 → 项目类型「小游戏」**，目录选本仓库根目录。
 2. 若提示 AppID，可选择「测试号」（项目已使用 `touristappid`）。
 3. 编译运行，即可在模拟器或真机预览中体验。
 
-> 渲染以 750×1334 为设计基准，通过 `wx.getSystemInfoSync` 等比缩放适配不同屏幕。
+> 渲染以 750 设计宽为基准，通过 `wx.getSystemInfoSync` 的 `pixelRatio` 等比缩放适配不同屏幕。
 
 ## 目录结构
 
 ```
-app.js / app.json / app.wxss      小程序入口与全局配置
-project.config.json / sitemap.json 项目与站点配置
-pages/index/                       唯一页面，WXML 只放一个全屏 <canvas type="2d">
+game.js          小游戏入口：wx.createCanvas + 全局触摸/前后台 + 启动引擎
+game.json        小游戏全局配置（竖屏等）
+project.config.json  项目配置（compileType: game）
 js/
   config.js   全局常量、配色、数值（集中管理便于扩展）
   utils.js    数学工具（clamp / lerp / damp 等）
@@ -23,13 +23,13 @@ js/
   camera.js   镜头：平滑跟随 + 房间夹紧
   player.js   玩家：摇杆驱动全向移动、行走动画
   room.js     房间：地板/墙体绘制与边界
-  engine.js   核心：Canvas 初始化、缩放、固定步长主循环、渲染编排
+  engine.js   核心：画布初始化、缩放、固定步长主循环、渲染编排
 ```
 
 ## 已实现（第一步：项目骨架与基础移动）
 
-- ✅ 小程序必需文件，页面只含一个全屏 Canvas 2D。
-- ✅ 主循环基于 `canvas.requestAnimationFrame`，采用**固定逻辑步长**（1/60）累加器，逻辑与渲染解耦。
+- ✅ 小游戏入口 `game.js`：`wx.createCanvas()` 取上屏画布，`wx.onTouch*` 注册触摸。
+- ✅ 主循环基于全局 `requestAnimationFrame`，采用**固定逻辑步长**（1/60）累加器，逻辑与渲染解耦。
 - ✅ 高清屏适配：按设备像素比设置后备分辨率，以 750 设计宽等比缩放。
 - ✅ 左侧**浮动虚拟摇杆**：左半屏按下即生成，驱动玩家全向（含八方向）移动，带死区与平滑加减速。
 - ✅ 玩家以圆形表示（暗红渐变 + 金色描边 + 朝向指示 + 行走摆动 + 落地阴影）。

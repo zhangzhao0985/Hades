@@ -1,19 +1,17 @@
 {
-  "description": "Hades 风格 2D 俯视角动作 Roguelike（微信小程序 Canvas 2D）",
+  "description": "Hades 风格 2D 俯视角动作 Roguelike（微信小游戏 Canvas 2D）",
   "packOptions": {
     "ignore": []
   },
   "setting": {
-    "urlCheck": false,
     "es6": true,
     "enhance": true,
-    "postcss": true,
     "minified": false,
     "bigPackageSizeSupport": true
   },
-  "compileType": "miniprogram",
+  "compileType": "game",
   "libVersion": "2.33.0",
   "appid": "touristappid",
-  "projectname": "hades-miniapp",
+  "projectname": "hades-minigame",
   "condition": {}
 }
