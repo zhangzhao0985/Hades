@@ -1,41 +1,19 @@
 {
   "description": "Hades 风格 2D 俯视角动作 Roguelike（微信小程序 Canvas 2D）",
   "packOptions": {
-    "ignore": [],
-    "include": []
+    "ignore": []
   },
   "setting": {
     "urlCheck": false,
     "es6": true,
     "enhance": true,
     "postcss": true,
-    "preloadBackgroundData": false,
     "minified": false,
-    "newFeature": true,
-    "coverView": true,
-    "nodeModules": false,
-    "autoAudits": false,
-    "showShadowRootInWxmlPanel": true,
-    "scopeDataCheck": false,
-    "uglifyFileName": false,
-    "checkInvalidKey": true,
-    "checkSiteMap": true,
-    "uploadWithSourceMap": true,
-    "compileHotReLoad": false,
-    "lazyloadPlaceholderEnable": false,
-    "useMultiFrameRuntime": true,
-    "useApiHook": true,
-    "useApiHostProcess": true,
-    "bigPackageSizeSupport": true,
-    "ignoreUploadUnusedFiles": true
+    "bigPackageSizeSupport": true
   },
   "compileType": "miniprogram",
   "libVersion": "2.33.0",
   "appid": "touristappid",
   "projectname": "hades-miniapp",
-  "condition": {},
-  "editorSetting": {
-    "tabIndent": "insertSpaces",
-    "tabSize": 2
-  }
+  "condition": {}
 }

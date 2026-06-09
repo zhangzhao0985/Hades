@@ -1,5 +1,5 @@
 // pages/index/index.js —— 游戏页面，负责初始化 Canvas 并把触摸事件转发给游戏
-const Game = require('../../js/game.js');
+const Game = require('../../js/engine.js');
 
 Page({
   data: {

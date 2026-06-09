@@ -1,4 +1,5 @@
-// js/game.js —— 游戏核心：Canvas 初始化、缩放适配、固定步长主循环、渲染编排
+// js/engine.js —— 游戏核心：Canvas 初始化、缩放适配、固定步长主循环、渲染编排
+// （文件名避免使用 game.js，以免被微信工具误判为「小游戏」入口）
 const Config = require('./config.js');
 const InputManager = require('./input.js');
 const Player = require('./player.js');
