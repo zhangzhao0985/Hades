@@ -92,11 +92,24 @@ const Config = {
     staminaCost: 25
   },
 
-  // 房间（第一步：单个大房间，便于展示镜头跟随；门系统在第三步）
-  room: {
-    width: 1800,
-    height: 2000,
-    wallThickness: 40
+  // 地牢（第三步：网格化随机房间 + 走廊 + 门）
+  dungeon: {
+    minRooms: 8,
+    maxRooms: 11,
+    roomW: 1500,
+    roomH: 1400,
+    corridor: 260,          // 相邻房间间距（走廊长度）
+    wallThickness: 40,
+    doorWidth: 220,
+    triggerDepth: 74,       // 门触发区纵深
+    transitionTime: 0.55    // 镜头平移/过门时长
+  },
+
+  // 各类房间的敌人数量（精英/Boss 暂用近战怪占位，真身在第五步）
+  roomEnemies: {
+    normal: [3, 5],
+    elite: [5, 7],
+    boss: [7, 7]
   },
 
   // 敌人
@@ -112,15 +125,6 @@ const Config = {
       knockbackDecay: 7,     // 被击退后的速度衰减
       hitstunMin: 0.18
     }
-  },
-
-  // 刷怪波次（门系统在第三步，这里先用无限波便于测试战斗）
-  wave: {
-    firstCount: 4,
-    countStep: 1,
-    maxCount: 8,
-    respawnDelay: 2.2,
-    spawnSafeDist: 260       // 生成点与玩家的最小距离
   },
 
   // 镜头
