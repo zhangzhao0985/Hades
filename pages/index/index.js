@@ -12,26 +12,35 @@ Page({
   onLoad() {
     // 用 getSystemInfoSync 拿到窗口尺寸，让 canvas 铺满整屏
     const info = wx.getSystemInfoSync();
-    this.setData({
-      screenW: info.windowWidth,
-      screenH: info.windowHeight
-    });
+    this.sysW = info.windowWidth;
+    this.sysH = info.windowHeight;
+    this.setData({ screenW: this.sysW, screenH: this.sysH });
   },
 
   onReady() {
-    // Canvas 2D 需要通过节点查询拿到真实 canvas 节点
+    this._initCanvas(0);
+  },
+
+  // Canvas 2D 需要通过节点查询拿到真实 canvas 节点（页面用 wx.createSelectorQuery，不能用 .in(this)）
+  _initCanvas(attempt) {
     wx.createSelectorQuery()
-      .in(this)
       .select('#gameCanvas')
       .fields({ node: true, size: true })
       .exec((res) => {
-        if (!res || !res[0] || !res[0].node) {
-          console.error('[Hades] 获取 Canvas 节点失败');
+        const node = res && res[0] && res[0].node;
+        if (!node) {
+          // 布局可能尚未就绪，重试几次
+          if (attempt < 5) {
+            setTimeout(() => this._initCanvas(attempt + 1), 50);
+          } else {
+            console.error('[Hades] 获取 Canvas 节点失败');
+          }
           return;
         }
-        const canvas = res[0].node;
-        const cssW = res[0].width;
-        const cssH = res[0].height;
+        const canvas = node;
+        // 优先用查询到的尺寸，为 0 时回退到系统窗口尺寸
+        const cssW = res[0].width || this.sysW;
+        const cssH = res[0].height || this.sysH;
         this.game = new Game(canvas, cssW, cssH);
         this.game.start();
       });

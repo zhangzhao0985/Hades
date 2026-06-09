@@ -54,6 +54,7 @@ class Game {
     if (this.running) return;
     this.running = true;
     this.lastTime = 0; // 重新计时，避免回前台后一次性大步进
+    this._render();    // 立即画一帧，确保启动瞬间就有画面
     this.rafId = this.canvas.requestAnimationFrame(this._loop);
   }
 
