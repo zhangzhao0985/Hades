@@ -1,0 +1,9 @@
+.game-root {
+  position: relative;
+  overflow: hidden;
+  background: #0d0613;
+}
+
+.game-canvas {
+  display: block;
+}
