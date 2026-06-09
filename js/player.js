@@ -131,10 +131,11 @@ class Player {
   }
 
   // 发起普攻；成功返回 true（引擎据武器类型决定挥砍/射箭）
-  tryAttack(input) {
+  // aimOverride：指定攻击方向（自动攻击时朝最近敌人），不传则用摇杆/朝向
+  tryAttack(input, aimOverride) {
     if (this.dead || this.dashing || this.attacking || this.attackCd > 0) return false;
     const w = this.weapon;
-    const dir = this._aimDir(input);
+    const dir = (aimOverride != null) ? aimOverride : this._aimDir(input);
     this.attackFacing = dir;
     this.facing = dir;
     this.attacking = true;
@@ -237,8 +238,8 @@ class Player {
     ctx.fill();
     ctx.restore();
 
-    const bob = this.moving ? Math.sin(this.animTime * Math.PI) * 3 : 0;
-    const cy = this.y + bob;
+    // 走动时不再上下晃动（保持平稳）
+    const cy = this.y;
 
     let alpha = 1;
     if (this.invuln > 0) {

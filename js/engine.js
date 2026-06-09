@@ -222,9 +222,12 @@ class Game {
     if (this.input.consumePress('ultimate')) {
       if (this.player.energyFull()) this._executeUltimate();
     }
+    // 普攻：按住 ⚔ 朝摇杆方向手动攻击；否则自动瞄准最近敌人
+    let didAttack = false;
     if (this.input.isPressed('attack')) {
-      if (this.player.tryAttack(this.input)) this._onAttackFired();
+      if (this.player.tryAttack(this.input)) { this._onAttackFired(); didAttack = true; }
     }
+    if (!didAttack) this._autoAttack();
 
     this.player.update(dt, this.input, this.arena);
 
@@ -259,6 +262,34 @@ class Game {
   addShake(a) { this.shake = clamp(this.shake + a, 0, 1); }
 
   // ---- 攻击 / 特殊 / 大招 ----
+  // 最近的存活敌人（忽略仍在破土的）
+  _nearestEnemy(x, y) {
+    let best = null, bd = Infinity;
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i];
+      if (!e.isAlive() || e.state === 'spawn') continue;
+      const d = dist(x, y, e.x, e.y);
+      if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+
+  // 自动攻击：剑在近身范围内自动挥砍，弓自动瞄准最近敌人射击
+  _autoAttack() {
+    const pl = this.player;
+    if (pl.dead || pl.dashing || pl.attacking || pl.attackCd > 0) return;
+    const target = this._nearestEnemy(pl.x, pl.y);
+    if (!target) return;
+    const w = pl.weapon;
+    const d = dist(pl.x, pl.y, target.x, target.y);
+    const range = (w.type === 'melee')
+      ? (w.reach + pl.radius + target.radius + 12)
+      : ((w.arrowRange || 760) * 0.95);
+    if (d > range) return;
+    const ang = Math.atan2(target.y - pl.y, target.x - pl.x);
+    if (pl.tryAttack(this.input, ang)) this._onAttackFired();
+  }
+
   _onAttackFired() {
     const w = this.player.weapon;
     if (w.type === 'melee') {
