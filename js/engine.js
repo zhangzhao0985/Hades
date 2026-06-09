@@ -1,5 +1,4 @@
-// js/engine.js —— 游戏核心：单一竞技场 + 不定时刷怪（普通/精英/Boss）+ 战斗/祝福 + 渲染
-// 同时兼容小游戏（全局 requestAnimationFrame）与小程序 Canvas 2D（canvas.requestAnimationFrame）
+// js/engine.js —— 核心：竞技场 + 刷怪 + 武器/普攻/特殊技/神怒大招 + 弹射物 + 祝福 + 渲染
 const Config = require('./config.js');
 const InputManager = require('./input.js');
 const Player = require('./player.js');
@@ -7,7 +6,9 @@ const Room = require('./room.js');
 const Camera = require('./camera.js');
 const Enemy = require('./enemy.js');
 const EffectsManager = require('./effects.js');
+const ProjectileManager = require('./projectile.js');
 const { BoonManager, GODS } = require('./boons.js');
+const { WEAPONS, WEAPON_LIST } = require('./weapons.js');
 const { clamp, len, dist } = require('./utils.js');
 
 function rnd(a, b) { return a + Math.random() * (b - a); }
@@ -38,6 +39,7 @@ class Game {
 
     this.input = new InputManager(cssW, cssH);
     this.effects = new EffectsManager(Config.effects.poolSize);
+    this.projectiles = new ProjectileManager(Config.projectiles.poolSize);
     this.player = new Player(0, 0);
     this.camera = new Camera(0, 0);
     this.camera.setViewport(this.viewWorldW, this.viewWorldH);
@@ -45,9 +47,11 @@ class Game {
     this.boons = new BoonManager();
     this.boonChoices = null;
     this.pendingBoons = 0;
+    this.weaponChoices = null;
     this.enemies = [];
     this.shake = 0;
-    this.state = 'playing';   // playing | boon | dead
+    this.flashT = 0;
+    this.state = 'weaponselect'; // weaponselect | playing | boon | dead
     this.deathPromptT = 0;
 
     this._initRun();
@@ -63,11 +67,10 @@ class Game {
     this._fpsTimer = 0;
   }
 
+  // 新征程：建竞技场、复位玩家/祝福，进入武器选择（不立即刷怪）
   _initRun() {
-    // 单一竞技场（复用 Room 绘制，无门）
     this.arena = new Room(0, 0, 'arena');
-    this.arena.x = 0;
-    this.arena.y = 0;
+    this.arena.x = 0; this.arena.y = 0;
     this.arena.width = Config.arena.width;
     this.arena.height = Config.arena.height;
     this.arena.wallThickness = Config.arena.wallThickness;
@@ -75,27 +78,44 @@ class Game {
 
     this.enemies.length = 0;
     this.effects.clear();
+    this.projectiles.clear();
     this.boons.reset();
     this.boonChoices = null;
     this.pendingBoons = 0;
     this.shake = 0;
+    this.flashT = 0;
 
     this.player.reset(this.arena.centerX(), this.arena.centerY());
     this.camera.snapTo(this.player, this.arena);
 
-    // 刷怪导演计时器
+    this.kills = 0;
+    this.elapsed = 0;
+    this.bossAlive = false;
+    this.bossWarnT = 0;
+
+    this.weaponChoices = this._layoutWeaponCards();
+    this.state = 'weaponselect';
+  }
+
+  _chooseWeapon(id) {
+    this.player.setWeapon(WEAPONS[id]);
+    this.player.energy = 0;
+    this._beginArena();
+  }
+
+  _beginArena() {
     const sp = Config.spawn;
     this.normalTimer = rnd(sp.normalIntervalMin, sp.normalIntervalMax);
     this.eliteTimer = rnd(sp.eliteIntervalMin, sp.eliteIntervalMax);
     this.bossTimer = rnd(sp.bossIntervalMin, sp.bossIntervalMax);
     this.bossAlive = false;
     this.bossWarnT = 0;
-
-    // 统计
     this.kills = 0;
     this.elapsed = 0;
-
+    this.enemies.length = 0;
     for (let i = 0; i < sp.initialNormals; i++) this._spawnEnemy('melee');
+    this.input.resetAll();
+    this.state = 'playing';
   }
 
   _raf(cb) {
@@ -154,10 +174,23 @@ class Game {
   // ============ 逻辑更新 ============
   _update(dt) {
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * Config.camera.shakeDecay);
+    if (this.flashT > 0) this.flashT -= dt;
+
+    if (this.state === 'weaponselect') {
+      const tap = this.input.consumeTap();
+      if (tap) {
+        for (const c of this.weaponChoices) {
+          if (this._pointInRect(tap, c.rect)) { this._chooseWeapon(c.id); break; }
+        }
+      }
+      this.effects.update(dt);
+      return;
+    }
 
     if (this.state === 'dead') {
       this.deathPromptT += dt;
       this.effects.update(dt);
+      this.projectiles.update(dt);
       if (this.deathPromptT > 0.8 && this.input.consumeAnyTap()) this._restart();
       return;
     }
@@ -173,6 +206,7 @@ class Game {
       return;
     }
 
+    // playing
     this.elapsed += dt;
     if (this.bossWarnT > 0) this.bossWarnT -= dt;
 
@@ -182,23 +216,23 @@ class Game {
         this.addShake(0.1);
       }
     }
+    if (this.input.consumePress('special')) {
+      if (this.player.trySpecial(this.input)) this._executeSpecial();
+    }
+    if (this.input.consumePress('ultimate')) {
+      if (this.player.energyFull()) this._executeUltimate();
+    }
     if (this.input.isPressed('attack')) {
-      if (this.player.tryAttack(this.input)) {
-        const isThird = this.player.comboIndex === 2;
-        this.effects.spawn('slash', {
-          x: this.player.x, y: this.player.y, angle: this.player.attackFacing,
-          reach: Config.attack.reach + this.player.radius + (isThird ? Config.attack.thirdHitReachBonus : 0),
-          half: Config.attack.halfAngle * (isThird ? 1.15 : 1),
-          dur: 0.22, color: Config.Palette.slash
-        });
-      }
+      if (this.player.tryAttack(this.input)) this._onAttackFired();
     }
 
     this.player.update(dt, this.input, this.arena);
 
-    for (let i = 0; i < this.enemies.length; i++) {
-      this.enemies[i].update(dt, this.player, this.arena);
-    }
+    for (let i = 0; i < this.enemies.length; i++) this.enemies[i].update(dt, this.player, this.arena);
+
+    this.projectiles.update(dt);
+    this._resolveProjectiles();
+
     this._separateEnemies();
     this._updateStatusEffects(dt);
     this._resolvePlayerAttack();
@@ -224,10 +258,97 @@ class Game {
 
   addShake(a) { this.shake = clamp(this.shake + a, 0, 1); }
 
+  // ---- 攻击 / 特殊 / 大招 ----
+  _onAttackFired() {
+    const w = this.player.weapon;
+    if (w.type === 'melee') {
+      const isThird = this.player.comboIndex === 2;
+      this.effects.spawn('slash', {
+        x: this.player.x, y: this.player.y, angle: this.player.attackFacing,
+        reach: w.reach + this.player.radius + (isThird ? w.thirdHitReachBonus : 0),
+        half: w.halfAngle * (isThird ? 1.15 : 1),
+        dur: 0.22, color: w.color
+      });
+    } else {
+      this._fireArrow(this.player.x, this.player.y, this.player.attackFacing, w.basicDamage, w.arrowKnockback, w.hitstun);
+    }
+  }
+
+  _fireArrow(x, y, angle, damage, kb, hitstun) {
+    const w = this.player.weapon;
+    const speed = w.arrowSpeed || 760;
+    this.projectiles.spawn({
+      x: x + Math.cos(angle) * this.player.radius,
+      y: y + Math.sin(angle) * this.player.radius,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      angle,
+      radius: w.arrowRadius || 7,
+      damage, knockback: kb, hitstun,
+      maxLife: (w.arrowRange || 760) / speed,
+      color: w.color
+    });
+  }
+
+  _executeSpecial() {
+    const w = this.player.weapon;
+    if (w.type === 'melee') {
+      const sp = w.special;
+      this.effects.spawn('shock', { x: this.player.x, y: this.player.y, maxR: sp.radius, dur: 0.35, color: w.color });
+      for (let i = 0; i < this.enemies.length; i++) {
+        const en = this.enemies[i];
+        if (!en.isAlive()) continue;
+        if (dist(en.x, en.y, this.player.x, this.player.y) <= sp.radius + en.radius) {
+          this._damageEnemy(en, sp.damage, this.player.x, this.player.y, sp.knockback, 0.25, w.color);
+        }
+      }
+      this.addShake(0.35);
+    } else {
+      const sp = w.special;
+      const n = sp.arrows;
+      const base = this.player.specialDir;
+      for (let i = 0; i < n; i++) {
+        const a = base + (i - (n - 1) / 2) * (sp.spread / Math.max(1, n - 1));
+        this._fireArrow(this.player.x, this.player.y, a, sp.damage, sp.arrowKnockback, w.hitstun);
+      }
+      this.addShake(0.12);
+    }
+  }
+
+  _executeUltimate() {
+    const u = Config.ultimate;
+    this.effects.spawn('shock', { x: this.player.x, y: this.player.y, maxR: u.radius, dur: 0.6, color: Config.Palette.olympusGoldLight });
+    this.flashT = 0.18;
+    for (let i = 0; i < this.enemies.length; i++) {
+      const en = this.enemies[i];
+      if (!en.isAlive()) continue;
+      if (dist(en.x, en.y, this.player.x, this.player.y) <= u.radius + en.radius) {
+        this._damageEnemy(en, u.damage, this.player.x, this.player.y, u.knockback, 0.3, Config.Palette.olympusGoldLight, { chain: false });
+      }
+    }
+    this.player.energy = 0;
+    this.player.invuln = Math.max(this.player.invuln, 0.6);
+    this.addShake(0.9);
+  }
+
+  // 统一伤害入口：套用祝福加成 + 特效 + 能量 + 连锁
+  _damageEnemy(en, base, fromX, fromY, knockback, hitstun, hitColor, opts) {
+    const m = this.boons.mods;
+    let dmg = base + m.bonusAttackDamage;
+    let kb = knockback;
+    if (m.poseidon.active) { dmg += m.poseidon.impactDamage; kb *= m.poseidon.knockbackMul; }
+    en.takeDamage(dmg, fromX, fromY, kb, hitstun);
+    if (m.ares.active) en.applyBleed(m.ares.dps, m.ares.duration);
+    if (m.aphrodite.active) en.applyWeak(m.aphrodite.weakMul, m.aphrodite.duration);
+    this.effects.spawn('hit', { x: en.x, y: en.y, angle: Math.atan2(en.y - fromY, en.x - fromX), dur: 0.2, color: hitColor || Config.Palette.spark });
+    this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: Math.round(dmg), vy: -70, dur: 0.6, color: Config.Palette.olympusGoldLight });
+    this.player.gainEnergy(Config.player.energyPerHit);
+    if (m.zeus.active && (!opts || opts.chain !== false)) this._chainLightning(en, m.zeus);
+  }
+
   // ---- 刷怪导演 ----
   _updateSpawns(dt) {
     const sp = Config.spawn;
-
     this.normalTimer -= dt;
     if (this.normalTimer <= 0) {
       this.normalTimer = rnd(sp.normalIntervalMin, sp.normalIntervalMax);
@@ -236,15 +357,11 @@ class Game {
         for (let i = 0; i < n; i++) this._spawnEnemy('melee');
       }
     }
-
     this.eliteTimer -= dt;
     if (this.eliteTimer <= 0) {
       this.eliteTimer = rnd(sp.eliteIntervalMin, sp.eliteIntervalMax);
-      if (this._countKind('elite') < sp.eliteCap && this._nonBossCount() < Config.enemy.maxOnScreen) {
-        this._spawnEnemy('elite');
-      }
+      if (this._countKind('elite') < sp.eliteCap && this._nonBossCount() < Config.enemy.maxOnScreen) this._spawnEnemy('elite');
     }
-
     this.bossTimer -= dt;
     if (this.bossTimer <= 0) {
       this.bossTimer = rnd(sp.bossIntervalMin, sp.bossIntervalMax);
@@ -273,9 +390,7 @@ class Game {
     const minY = a.y + wt + m, maxY = a.y + a.height - wt - m;
     let x = 0, y = 0, tries = 0;
     do {
-      x = rnd(minX, maxX);
-      y = rnd(minY, maxY);
-      tries++;
+      x = rnd(minX, maxX); y = rnd(minY, maxY); tries++;
     } while (dist(x, y, this.player.x, this.player.y) < Config.spawn.safeDist && tries < 30);
     return { x, y };
   }
@@ -294,43 +409,46 @@ class Game {
     for (let i = 0; i < this.enemies.length; i++) if (this.enemies[i].isBoss() && this.enemies[i].isAlive()) return this.enemies[i];
     return null;
   }
-  _aliveEnemies() {
-    let n = 0;
-    for (let i = 0; i < this.enemies.length; i++) if (this.enemies[i].isAlive()) n++;
-    return n;
-  }
 
   // ---- 战斗结算 ----
+  _resolveProjectiles() {
+    const a = this.arena, wt = a.wallThickness;
+    this.projectiles.forEachActive((pr) => {
+      if (pr.x < a.x + wt || pr.x > a.x + a.width - wt || pr.y < a.y + wt || pr.y > a.y + a.height - wt) {
+        pr.active = false;
+        this.effects.spawn('hit', { x: pr.x, y: pr.y, angle: pr.angle, dur: 0.15, color: pr.color });
+        return;
+      }
+      for (let i = 0; i < this.enemies.length; i++) {
+        const en = this.enemies[i];
+        if (!en.isAlive()) continue;
+        const dx = en.x - pr.x, dy = en.y - pr.y;
+        const rr = en.radius + pr.radius;
+        if (dx * dx + dy * dy <= rr * rr) {
+          this._damageEnemy(en, pr.damage, pr.x, pr.y, pr.knockback, pr.hitstun, pr.color);
+          this.addShake(0.08);
+          pr.active = false;
+          break;
+        }
+      }
+    });
+  }
+
   _resolvePlayerAttack() {
     const hb = this.player.getAttackHitbox();
     if (!hb) return;
-    const m = this.boons.mods;
     for (let i = 0; i < this.enemies.length; i++) {
       const en = this.enemies[i];
       if (!en.isAlive()) continue;
       if (en.lastHitSwingId === hb.swingId) continue;
-
-      const dx = en.x - hb.x;
-      const dy = en.y - hb.y;
+      const dx = en.x - hb.x, dy = en.y - hb.y;
       const d = len(dx, dy);
       if (d > hb.reach + en.radius) continue;
       const ang = Math.atan2(dy, dx);
       if (Math.abs(this._angleDiff(ang, hb.facing)) > hb.halfAngle) continue;
-
-      let dmg = hb.damage + m.bonusAttackDamage;
-      let kb = hb.knockback;
-      if (m.poseidon.active) { dmg += m.poseidon.impactDamage; kb *= m.poseidon.knockbackMul; }
-
       en.lastHitSwingId = hb.swingId;
-      en.takeDamage(dmg, hb.x, hb.y, kb, hb.hitstun);
-      if (m.ares.active) en.applyBleed(m.ares.dps, m.ares.duration);
-      if (m.aphrodite.active) en.applyWeak(m.aphrodite.weakMul, m.aphrodite.duration);
-
-      this.effects.spawn('hit', { x: en.x, y: en.y, angle: ang, dur: 0.22, color: Config.Palette.spark });
-      this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: Math.round(dmg), vy: -70, dur: 0.6, color: Config.Palette.olympusGoldLight });
+      this._damageEnemy(en, hb.damage, hb.x, hb.y, hb.knockback, hb.hitstun, Config.Palette.spark);
       this.addShake(0.16);
-
-      if (m.zeus.active) this._chainLightning(en, m.zeus);
     }
   }
 
@@ -365,7 +483,7 @@ class Game {
           this.effects.spawn('dmg', { x: e.x + (Math.random() * 16 - 8), y: e.y - e.radius, text: '·', vy: -28, dur: 0.4, color: Config.Palette.bloodRedLight });
         }
       }
-      e.updateStatus(dt); // 死亡统一在 _handleKills 处理
+      e.updateStatus(dt);
     }
   }
 
@@ -373,18 +491,14 @@ class Game {
     const m = this.boons.mods;
     for (let i = 0; i < this.enemies.length; i++) {
       const en = this.enemies[i];
-      const dx = this.player.x - en.x;
-      const dy = this.player.y - en.y;
+      const dx = this.player.x - en.x, dy = this.player.y - en.y;
       const d = len(dx, dy);
       if (d > this.player.radius + en.radius) continue;
 
       if (this.player.isInvincible()) {
-        // 雅典娜：闪避无敌中撞击敌人
         if (m.athena.active && this.player.dashing && en.canBeDeflected()) {
           en.deflectCd = 0.3;
-          en.takeDamage(m.athena.damage, this.player.x, this.player.y, m.athena.knockback, 0.2);
-          this.effects.spawn('hit', { x: en.x, y: en.y, angle: Math.atan2(dy, dx), dur: 0.2, color: Config.Palette.olympusBlueLight });
-          this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: Math.round(m.athena.damage), vy: -60, dur: 0.5, color: Config.Palette.olympusBlueLight });
+          this._damageEnemy(en, m.athena.damage, this.player.x, this.player.y, m.athena.knockback, 0.2, Config.Palette.olympusBlueLight, { chain: false });
           this.addShake(0.2);
         }
         continue;
@@ -392,6 +506,7 @@ class Game {
 
       if (en.canDamagePlayer()) {
         if (this.player.takeDamage(en.contactDamage(), en.x, en.y)) {
+          this.player.gainEnergy(Config.player.energyOnHurt);
           en.contactCd = en.stats.contactCooldown;
           const l = d || 1;
           en.vx = -dx / l * 120 * en.stats.knockbackResist;
@@ -403,19 +518,15 @@ class Game {
     }
   }
 
-  // 统一处理本帧新死亡的敌人（任何伤害来源）
   _handleKills() {
     for (let i = 0; i < this.enemies.length; i++) {
       const e = this.enemies[i];
       if (e.state !== 'dead' || e._killHandled) continue;
       e._killHandled = true;
       this.kills++;
-
       const col = e.isBoss() ? Config.Palette.bloodRedLight : (e.kind === 'elite' ? Config.Palette.lavaGlow : Config.Palette.spark);
       this.effects.spawn('death', { x: e.x, y: e.y, dur: e.isBoss() ? 0.7 : 0.35, color: col });
       this.addShake(e.isBoss() ? 0.7 : (e.kind === 'elite' ? 0.4 : 0.28));
-
-      // 击败精英 / Boss → 获得祝福；Boss 额外回血
       if (e.kind === 'elite' || e.isBoss()) this.pendingBoons++;
       if (e.isBoss()) {
         this.bossAlive = false;
@@ -465,14 +576,12 @@ class Game {
   _layoutBoonCards(choices) {
     const cw = this.cssW, ch = this.cssH;
     const cardW = Math.min(cw - 56, 360);
-    const cardH = 132;
-    const gap = 18;
+    const cardH = 132, gap = 18;
     const total = choices.length * cardH + (choices.length - 1) * gap;
     const startY = (ch - total) / 2 + 20;
     const x = (cw - cardW) / 2;
     return choices.map((c, i) => ({
-      def: c.def,
-      nextLevel: c.nextLevel,
+      def: c.def, nextLevel: c.nextLevel,
       rect: { x, y: startY + i * (cardH + gap), w: cardW, h: cardH }
     }));
   }
@@ -485,7 +594,6 @@ class Game {
     this.player.maxStamina = Config.player.maxStamina + m.bonusMaxStamina;
     const heal = this.player.maxHp - prevMaxHp;
     if (heal > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
-
     this.effects.spawn('death', { x: this.player.x, y: this.player.y, dur: 0.5, color: Config.Palette.olympusGoldLight });
     this.boonChoices = null;
     this.pendingBoons = Math.max(0, this.pendingBoons - 1);
@@ -494,13 +602,22 @@ class Game {
     else this.state = 'playing';
   }
 
-  _pointInRect(p, r) {
-    return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
-  }
+  _pointInRect(p, r) { return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
 
-  _restart() {
-    this.state = 'playing';
-    this._initRun();
+  _restart() { this._initRun(); }
+
+  // ---- 武器选择卡片 ----
+  _layoutWeaponCards() {
+    const cw = this.cssW, ch = this.cssH;
+    const cardW = Math.min(cw - 56, 360);
+    const cardH = 150, gap = 22;
+    const total = WEAPON_LIST.length * cardH + (WEAPON_LIST.length - 1) * gap;
+    const startY = (ch - total) / 2 + 16;
+    const x = (cw - cardW) / 2;
+    return WEAPON_LIST.map((id, i) => ({
+      id, weapon: WEAPONS[id],
+      rect: { x, y: startY + i * (cardH + gap), w: cardW, h: cardH }
+    }));
   }
 
   // ============ 渲染 ============
@@ -526,6 +643,7 @@ class Game {
 
     this.arena.draw(ctx);
     for (let i = 0; i < this.enemies.length; i++) this.enemies[i].draw(ctx);
+    this.projectiles.draw(ctx);
     this.player.draw(ctx);
     this.effects.draw(ctx);
 
@@ -534,16 +652,27 @@ class Game {
   }
 
   _renderUI(ctx) {
-    if (this.state !== 'boon') {
+    if (this.state === 'playing' || this.state === 'boon' || this.state === 'dead') {
+      this._drawHud(ctx);
+      this._drawBoonBar(ctx);
+      this._drawBossBar(ctx);
+    }
+    if (this.state === 'playing') {
       this._drawJoystick(ctx);
       this._drawActionButtons(ctx);
+      if (this.bossWarnT > 0) this._drawBossWarn(ctx);
     }
-    this._drawHud(ctx);
-    this._drawBoonBar(ctx);
-    this._drawBossBar(ctx);
-    if (this.bossWarnT > 0 && this.state === 'playing') this._drawBossWarn(ctx);
+    if (this.flashT > 0) this._drawFlash(ctx);
+    if (this.state === 'weaponselect') this._drawWeaponSelect(ctx);
     if (this.state === 'boon') this._drawBoonOverlay(ctx);
     if (this.state === 'dead') this._drawDeathOverlay(ctx);
+  }
+
+  _drawFlash(ctx) {
+    ctx.globalAlpha = clamp(this.flashT / 0.18, 0, 1) * 0.55;
+    ctx.fillStyle = '#fff7e0';
+    ctx.fillRect(0, 0, this.cssW, this.cssH);
+    ctx.globalAlpha = 1;
   }
 
   _drawJoystick(ctx) {
@@ -570,17 +699,17 @@ class Game {
 
   _drawActionButtons(ctx) {
     const P = Config.Palette;
+    const pl = this.player;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const key in this.input.buttons) {
       const b = this.input.buttons[key];
-      let avail = b.enabled;
-      if (key === 'dash') {
-        avail = this.player.stamina >= Config.dash.staminaCost && this.player.dashCd <= 0 && !this.player.dashing && !this.player.dead;
-      } else if (key === 'attack') {
-        avail = !this.player.dead;
-      }
-      const baseAlpha = b.enabled ? (avail ? (b.pressed ? 0.95 : 0.6) : 0.32) : 0.26;
+      let avail = true;
+      if (key === 'dash') avail = pl.stamina >= Config.dash.staminaCost && pl.dashCd <= 0 && !pl.dashing;
+      else if (key === 'special') avail = pl.specialCd <= 0;
+      else if (key === 'ultimate') avail = pl.energyFull();
+
+      const baseAlpha = avail ? (b.pressed ? 0.95 : 0.62) : 0.34;
       const rr = b.r * (b.pressed ? 0.92 : 1);
       ctx.globalAlpha = baseAlpha;
       ctx.beginPath();
@@ -590,9 +719,29 @@ class Game {
       ctx.lineWidth = 2.5;
       ctx.strokeStyle = b.color;
       ctx.stroke();
-      ctx.globalAlpha = b.enabled ? (avail ? 1 : 0.5) : 0.4;
+
+      // 冷却 / 能量指示环
+      if (key === 'ultimate') {
+        const frac = clamp(pl.energy / pl.maxEnergy, 0, 1);
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = avail ? P.olympusGoldLight : P.lavaGlow;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r - 4, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+        ctx.stroke();
+      } else if (key === 'special' && pl.specialCd > 0) {
+        const frac = clamp(pl.specialCd / pl.weapon.special.cooldown, 0, 1);
+        ctx.globalAlpha = 0.8;
+        ctx.strokeStyle = 'rgba(243,233,210,0.5)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r - 4, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.globalAlpha = avail ? 1 : 0.5;
       ctx.fillStyle = P.textLight;
-      ctx.font = Math.round(b.r * 0.7) + 'px sans-serif';
+      ctx.font = Math.round(b.r * 0.66) + 'px sans-serif';
       ctx.fillText(b.label, b.x, b.y + 1);
     }
     ctx.globalAlpha = 1;
@@ -615,40 +764,35 @@ class Game {
   _drawHud(ctx) {
     const P = Config.Palette;
     const cw = this.cssW;
-
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillStyle = P.olympusGoldLight;
     ctx.font = 'bold 22px serif';
-    ctx.fillText('HADES · 冥府竞技场', 20, 18);
+    ctx.fillText('HADES · 冥府竞技场', 20, 16);
 
     const bx = 20, bw = 240;
-    this._drawBar(ctx, bx, 50, bw, 18, this.player.hp / this.player.maxHp, P.hpFill, P.hpFillLight);
+    this._drawBar(ctx, bx, 46, bw, 16, this.player.hp / this.player.maxHp, P.hpFill, P.hpFillLight);
     ctx.fillStyle = P.textLight;
-    ctx.font = '12px sans-serif';
+    ctx.font = '11px sans-serif';
     ctx.textBaseline = 'middle';
-    ctx.fillText('HP ' + Math.ceil(this.player.hp) + ' / ' + this.player.maxHp, bx + 8, 50 + 9);
-    this._drawBar(ctx, bx, 74, bw, 12, this.player.stamina / this.player.maxStamina, P.staminaFill, P.staminaFillLight);
+    ctx.fillText('HP ' + Math.ceil(this.player.hp) + '/' + this.player.maxHp, bx + 8, 46 + 8);
+    this._drawBar(ctx, bx, 68, bw, 9, this.player.stamina / this.player.maxStamina, P.staminaFill, P.staminaFillLight);
+    this._drawBar(ctx, bx, 83, bw, 9, this.player.energy / this.player.maxEnergy, '#e08a2b', P.olympusGoldLight);
 
-    ctx.textBaseline = 'top';
-    ctx.fillStyle = 'rgba(243,233,210,0.4)';
-    ctx.font = '12px sans-serif';
-    ctx.fillText('左摇杆移动 · ⚔ 按住连击 · » 闪避 · 击败精英/BOSS 获得祝福', bx, 92);
-
-    // 存活时间 / 击杀（右上）
+    // 存活 / 击杀（右上）
     ctx.textAlign = 'right';
     ctx.textBaseline = 'top';
     ctx.fillStyle = 'rgba(243,233,210,0.85)';
     ctx.font = '14px sans-serif';
-    ctx.fillText('存活 ' + fmtTime(this.elapsed) + ' · 击杀 ' + this.kills, cw - 16, 20);
+    ctx.fillText('存活 ' + fmtTime(this.elapsed) + ' · 击杀 ' + this.kills, cw - 16, 18);
     ctx.fillStyle = 'rgba(243,233,210,0.45)';
-    ctx.fillText('FPS ' + this.fps, cw - 16, 40);
+    ctx.fillText('武器：' + this.player.weapon.name + '  FPS ' + this.fps, cw - 16, 38);
   }
 
   _drawBoonBar(ctx) {
     const order = this.boons.order;
     if (order.length === 0) return;
-    const x0 = 20, y0 = 112, s = 26, gap = 6;
+    const x0 = 20, y0 = 100, s = 24, gap = 6;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (let i = 0; i < order.length; i++) {
@@ -665,12 +809,12 @@ class Game {
       ctx.strokeStyle = g.accent;
       ctx.stroke();
       ctx.fillStyle = g.color;
-      ctx.font = 'bold 15px serif';
+      ctx.font = 'bold 14px serif';
       ctx.fillText(def.short, x + s / 2, y0 + s / 2 + 1);
       ctx.fillStyle = Config.Palette.olympusGoldLight;
       for (let k = 0; k < lv; k++) {
         ctx.beginPath();
-        ctx.arc(x + 4 + k * 5, y0 + s + 4, 2, 0, Math.PI * 2);
+        ctx.arc(x + 4 + k * 5, y0 + s + 3, 2, 0, Math.PI * 2);
         ctx.fill();
       }
     }
@@ -681,12 +825,12 @@ class Game {
     if (!boss) return;
     const P = Config.Palette;
     const cw = this.cssW;
-    const w = Math.min(cw - 80, 420), h = 16, x = (cw - w) / 2, y = 50;
+    const w = Math.min(cw - 80, 420), h = 14, x = (cw - w) / 2, y = 116;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillStyle = P.bloodRedLight;
-    ctx.font = 'bold 14px serif';
-    ctx.fillText('冥府守卫 · BOSS' + (boss.bossPhase === 2 ? '  【狂暴】' : ''), cw / 2, y - 4);
+    ctx.font = 'bold 13px serif';
+    ctx.fillText('冥府守卫 · BOSS' + (boss.bossPhase === 2 ? '  【狂暴】' : ''), cw / 2, y - 3);
     this._drawBar(ctx, x, y, w, h, boss.hp / boss.maxHp, P.bloodRed, P.bloodRedLight);
   }
 
@@ -697,7 +841,7 @@ class Game {
       ctx.textBaseline = 'middle';
       ctx.fillStyle = Config.Palette.bloodRedLight;
       ctx.font = 'bold 34px serif';
-      ctx.fillText('⚠ BOSS 降临 ⚠', cw / 2, ch * 0.32);
+      ctx.fillText('⚠ BOSS 降临 ⚠', cw / 2, ch * 0.3);
     }
   }
 
@@ -711,6 +855,64 @@ class Game {
     }
     if (line) lines.push(line);
     return lines;
+  }
+
+  _drawWeaponSelect(ctx) {
+    const P = Config.Palette;
+    const cw = this.cssW, ch = this.cssH;
+    ctx.fillStyle = 'rgba(8,4,16,0.9)';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = 'bold 28px serif';
+    const topY = this.weaponChoices[0].rect.y - 50;
+    ctx.fillText('选 择 你 的 武 器', cw / 2, topY);
+    ctx.fillStyle = 'rgba(243,233,210,0.6)';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('武器决定普攻与特殊技（✦）的方式', cw / 2, topY + 26);
+
+    for (const c of this.weaponChoices) this._drawWeaponCard(ctx, c);
+  }
+
+  _drawWeaponCard(ctx, c) {
+    const P = Config.Palette;
+    const r = c.rect;
+    const w = c.weapon;
+
+    ctx.fillStyle = 'rgba(24,14,38,0.96)';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = w.color;
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+    const badgeX = r.x + 46, badgeY = r.y + r.h / 2;
+    ctx.beginPath();
+    ctx.arc(badgeX, badgeY, 32, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(10,6,18,0.9)';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = w.color;
+    ctx.stroke();
+    ctx.fillStyle = w.color;
+    ctx.font = 'bold 30px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(w.short, badgeX, badgeY + 1);
+
+    const tx = r.x + 92;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = w.color;
+    ctx.font = 'bold 20px serif';
+    ctx.fillText(w.name, tx, r.y + 18);
+    ctx.fillStyle = 'rgba(243,233,210,0.55)';
+    ctx.font = '12px sans-serif';
+    ctx.fillText(w.type === 'melee' ? '近战' : '远程', tx, r.y + 44);
+    ctx.fillStyle = P.textLight;
+    ctx.font = '13px sans-serif';
+    const lines = this._wrapText(ctx, w.desc, r.w - 108);
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], tx, r.y + 66 + i * 18);
   }
 
   _drawBoonOverlay(ctx) {
@@ -735,13 +937,11 @@ class Game {
     const r = c.rect;
     const def = c.def;
     const g = GODS[def.god];
-
     ctx.fillStyle = 'rgba(24,14,38,0.96)';
     ctx.fillRect(r.x, r.y, r.w, r.h);
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = g.accent;
     ctx.strokeRect(r.x, r.y, r.w, r.h);
-
     const badgeX = r.x + 40, badgeY = r.y + r.h / 2;
     ctx.beginPath();
     ctx.arc(badgeX, badgeY, 26, 0, Math.PI * 2);
@@ -755,7 +955,6 @@ class Game {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(def.short, badgeX, badgeY + 1);
-
     const tx = r.x + 78;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -787,7 +986,7 @@ class Game {
     if (this.deathPromptT > 0.8 && Math.floor(this.deathPromptT * 2) % 2 === 0) {
       ctx.fillStyle = P.olympusGoldLight;
       ctx.font = '20px serif';
-      ctx.fillText('轻触重新开始', cw / 2, ch / 2 + 50);
+      ctx.fillText('轻触重新开始（重选武器）', cw / 2, ch / 2 + 50);
     }
   }
 }

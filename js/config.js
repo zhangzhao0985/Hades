@@ -62,7 +62,22 @@ const Config = {
     staminaRegenDelay: 0.4, // 消耗后延迟多久开始回复
     hitInvuln: 0.7,         // 受击无敌时长
     knockbackTaken: 160,    // 受击被击退的速度
-    staggerTime: 0.14       // 受击短硬直（失控时长）
+    staggerTime: 0.14,      // 受击短硬直（失控时长）
+    maxEnergy: 100,         // 神怒能量上限
+    energyPerHit: 6,        // 每次命中获得能量
+    energyOnHurt: 9         // 受击获得能量
+  },
+
+  // 神怒大招（满能量释放，全屏伤害）
+  ultimate: {
+    damage: 120,
+    knockback: 520,
+    radius: 1300
+  },
+
+  // 弹射物（弓箭等）对象池
+  projectiles: {
+    poolSize: 96
   },
 
   // 普通攻击（扇形判定 + 三段连击）

@@ -26,6 +26,7 @@ class Effect {
     this.text = o.text != null ? String(o.text) : '';
     this.x2 = o.x2 != null ? o.x2 : this.x;
     this.y2 = o.y2 != null ? o.y2 : this.y;
+    this.maxR = o.maxR || 160;
   }
 
   update(dt) {
@@ -44,7 +45,33 @@ class Effect {
       case 'dmg': this._dmg(ctx, p); break;
       case 'dashtrail': this._dash(ctx, p); break;
       case 'lightning': this._lightning(ctx, p); break;
+      case 'shock': this._shock(ctx, p); break;
     }
+  }
+
+  // 冲击波环（旋斩 / 神怒大招）：从中心向外扩张并淡出
+  _shock(ctx, p) {
+    const r = this.maxR * (0.2 + 0.8 * p);
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    // 填充渐隐圆
+    ctx.globalAlpha = (1 - p) * 0.35;
+    const g = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, r);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(0.8, this.color);
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fill();
+    // 亮环
+    ctx.globalAlpha = (1 - p) * 0.9;
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 5 * (1 - p) + 1;
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   // 连锁闪电：抖动的折线 + 辉光

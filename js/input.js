@@ -35,9 +35,10 @@ class InputManager {
   _layoutButtons(cssW, cssH) {
     const P = Config.Palette;
     return {
-      attack:  { x: cssW - 80,  y: cssH - 100, r: 52, label: '⚔', color: P.bloodRed,    enabled: true,  pressed: false, justPressed: false, touchId: null },
-      dash:    { x: cssW - 180, y: cssH - 74,  r: 40, label: '»', color: P.olympusBlue,  enabled: true,  pressed: false, justPressed: false, touchId: null },
-      special: { x: cssW - 108, y: cssH - 212, r: 40, label: '✦', color: P.olympusGold,  enabled: false, pressed: false, justPressed: false, touchId: null }
+      attack:   { x: cssW - 78,  y: cssH - 104, r: 50, label: '⚔', color: P.bloodRed,       enabled: true, pressed: false, justPressed: false, touchId: null },
+      dash:     { x: cssW - 174, y: cssH - 82,  r: 40, label: '»', color: P.olympusBlue,     enabled: true, pressed: false, justPressed: false, touchId: null },
+      special:  { x: cssW - 86,  y: cssH - 220, r: 42, label: '✦', color: P.olympusGold,     enabled: true, pressed: false, justPressed: false, touchId: null },
+      ultimate: { x: cssW - 186, y: cssH - 186, r: 42, label: '⚡', color: P.bloodRedLight,   enabled: true, pressed: false, justPressed: false, touchId: null }
     };
   }
 
