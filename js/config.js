@@ -21,7 +21,23 @@ const Palette = {
   floorLine: '#3a2a55',         // 地板网格线
   wall: '#0b0410',              // 墙体
   textLight: '#f3e9d2',         // 浅色文字
-  shadow: 'rgba(0,0,0,0.45)'
+  shadow: 'rgba(0,0,0,0.45)',
+
+  // 敌人
+  enemyBody: '#6a3d8f',         // 冥界亡魂紫
+  enemyBodyLight: '#9b6fc4',
+  enemyEye: '#ffd76a',
+
+  // UI 血条 / 体力
+  hpBack: 'rgba(0,0,0,0.5)',
+  hpFill: '#d23b2e',
+  hpFillLight: '#ff6f5e',
+  staminaFill: '#4ea3ff',
+  staminaFillLight: '#8fd0ff',
+
+  // 命中特效
+  slash: '#ffe08a',
+  spark: '#ffae42'
 };
 
 const Config = {
@@ -38,26 +54,91 @@ const Config = {
   // 玩家
   player: {
     radius: 28,
-    speed: 330,        // 世界单位/秒
-    moveDamp: 16       // 加减速平滑系数（越大越跟手）
+    speed: 330,             // 世界单位/秒
+    moveDamp: 16,           // 加减速平滑系数（越大越跟手）
+    maxHp: 100,
+    maxStamina: 100,
+    staminaRegen: 26,       // 体力每秒回复
+    staminaRegenDelay: 0.4, // 消耗后延迟多久开始回复
+    hitInvuln: 0.7,         // 受击无敌时长
+    knockbackTaken: 160,    // 受击被击退的速度
+    staggerTime: 0.14       // 受击短硬直（失控时长）
   },
 
-  // 房间（第一步：单个大房间，便于展示镜头跟随）
+  // 普通攻击（扇形判定 + 三段连击）
+  attack: {
+    damage: 18,
+    reach: 100,             // 扇形半径（从玩家中心，命中时再加敌人半径）
+    halfAngle: Math.PI / 3, // 扇形半角 60°
+    windup: 0.05,           // 前摇
+    active: 0.12,           // 命中判定持续
+    recover: 0.15,          // 后摇
+    gap: 0.02,              // 两次挥砍最小间隔
+    comboWindow: 0.45,      // 连击衔接窗口
+    knockback: 230,
+    hitstun: 0.3,
+    moveScale: 0.45,        // 攻击时移动速度倍率
+    thirdHitDamageBonus: 12,
+    thirdHitReachBonus: 26,
+    thirdHitKnockbackBonus: 170
+  },
+
+  // 闪避
+  dash: {
+    distance: 200,
+    duration: 0.16,
+    iFrames: 0.26,          // 无敌帧（略长于位移）
+    cooldown: 0.28,
+    staminaCost: 25
+  },
+
+  // 房间（第一步：单个大房间，便于展示镜头跟随；门系统在第三步）
   room: {
     width: 1800,
     height: 2000,
     wallThickness: 40
   },
 
+  // 敌人
+  enemy: {
+    maxOnScreen: 16,
+    melee: {
+      radius: 26,
+      speed: 152,
+      maxHp: 40,
+      contactDamage: 12,
+      contactCooldown: 0.9,
+      spawnTime: 0.5,        // 生成（破土）时长
+      knockbackDecay: 7,     // 被击退后的速度衰减
+      hitstunMin: 0.18
+    }
+  },
+
+  // 刷怪波次（门系统在第三步，这里先用无限波便于测试战斗）
+  wave: {
+    firstCount: 4,
+    countStep: 1,
+    maxCount: 8,
+    respawnDelay: 2.2,
+    spawnSafeDist: 260       // 生成点与玩家的最小距离
+  },
+
   // 镜头
   camera: {
-    smooth: 8          // 跟随平滑系数
+    smooth: 8,
+    shakeDecay: 2.6,         // 震屏衰减速度
+    shakeMax: 16             // 最大震屏位移（世界单位）
   },
 
   // 虚拟摇杆（CSS px 单位）
   joystick: {
     maxRadius: 92,
     deadZone: 0.08
+  },
+
+  // 特效对象池
+  effects: {
+    poolSize: 80
   }
 };
 
