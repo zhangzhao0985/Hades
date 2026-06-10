@@ -4,6 +4,10 @@ const { WEAPONS } = require('./weapons.js');
 const { drawCharacter, SKINS } = require('./sprites.js');
 const { clamp, len, damp } = require('./utils.js');
 
+// 六等骑士称号（击败 Boss 逐级提升）
+const RANKS = ['见习扈从', '铁砧骑士', '准骑士', '猎风骑士', '翼冠骑士', '神印骑士'];
+const MELEE_REACH_PER_UP = 26; // 每次 Boss 升级，剑的攻击范围增量
+
 class Player {
   constructor(x, y) {
     this.weapon = WEAPONS.sword; // 默认武器，开局由武器选择覆盖
@@ -32,6 +36,10 @@ class Player {
 
     this.energy = 0;
     this.maxEnergy = Config.player.maxEnergy;
+
+    // Boss 击败成长：骑士等级 + 武器升级次数
+    this.rank = 0;        // 0~5，对应六等骑士
+    this.weaponUp = 0;    // 当前武器随 Boss 击败累计的升级次数
 
     this.invuln = 0;
     this.stagger = 0;
@@ -67,6 +75,18 @@ class Player {
   isInvincible() { return this.dashing || this.invuln > 0; }
   gainEnergy(n) { this.energy = Math.min(this.maxEnergy, this.energy + n); }
   energyFull() { return this.energy >= this.maxEnergy; }
+  rankName() { return RANKS[this.rank]; }
+
+  // Boss 击败升级：骑士晋级 + 武器强化
+  bossUpgrade() {
+    this.rank = Math.min(RANKS.length - 1, this.rank + 1);
+    this.weaponUp++;
+  }
+
+  // 剑的攻击范围加成（随升级增长）
+  meleeReachBonus() { return this.weapon.type === 'melee' ? this.weaponUp * MELEE_REACH_PER_UP : 0; }
+  // 弓每次射箭数量（每次升级 +1，1→双发→三发…）
+  bowArrows() { return 1 + (this.weapon.type === 'ranged' ? this.weaponUp : 0); }
 
   _aimDir(input) {
     const js = input.joystick;
@@ -202,7 +222,7 @@ class Player {
     const isThird = this.comboIndex === 2;
     return {
       x: this.x, y: this.y, facing: this.attackFacing,
-      reach: w.reach + this.radius + (isThird ? w.thirdHitReachBonus : 0),
+      reach: w.reach + this.radius + this.meleeReachBonus() + (isThird ? w.thirdHitReachBonus : 0),
       halfAngle: w.halfAngle * (isThird ? 1.15 : 1),
       damage: w.basicDamage + (isThird ? w.thirdHitDamageBonus : 0),
       knockback: w.knockback + (isThird ? w.thirdHitKnockbackBonus : 0),
@@ -266,13 +286,31 @@ class Player {
       walk: this.animTime,
       moving: this.moving,
       colors: SKINS.player,
-      feature: 'laurel',
+      feature: this.rank >= 4 ? 'crown' : 'laurel',
       glowEyes: false,
       sash: true,
       weapon: this.weapon.type === 'ranged' ? 'bow' : 'sword',
+      rank: this.rank,
+      weaponLevel: this.weaponUp,
       alpha
     });
+
+    // 头顶骑士称号
+    const name = RANKS[this.rank];
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.font = 'bold ' + Math.round(r * 0.6) + 'px serif';
+    ctx.lineWidth = Math.max(2, r * 0.16);
+    ctx.strokeStyle = 'rgba(8,4,16,0.9)';
+    ctx.fillStyle = P.olympusGoldLight;
+    const ny = this.y - r * (this.rank >= 3 ? 2.15 : 1.7);
+    ctx.strokeText(name, this.x, ny);
+    ctx.fillText(name, this.x, ny);
+    ctx.restore();
   }
 }
+
+Player.RANKS = RANKS;
 
 module.exports = Player;

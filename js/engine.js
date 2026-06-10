@@ -48,10 +48,12 @@ class Game {
     this.boonChoices = null;
     this.pendingBoons = 0;
     this.weaponChoices = null;
+    this.upgradePopup = null;
+    this.upgradePromptT = 0;
     this.enemies = [];
     this.shake = 0;
     this.flashT = 0;
-    this.state = 'weaponselect'; // weaponselect | playing | boon | dead
+    this.state = 'weaponselect'; // weaponselect | playing | upgrade | boon | dead
     this.deathPromptT = 0;
 
     this._initRun();
@@ -206,6 +208,18 @@ class Game {
       return;
     }
 
+    if (this.state === 'upgrade') {
+      this.effects.update(dt);
+      this.upgradePromptT += dt;
+      const tap = this.input.consumeTap();
+      if (tap && this.upgradePromptT > 0.4) {
+        this.upgradePopup = null;
+        this.state = 'playing';
+        if (this.pendingBoons > 0) this._openBoonSelection();
+      }
+      return;
+    }
+
     // playing
     this.elapsed += dt;
     if (this.bossWarnT > 0) this.bossWarnT -= dt;
@@ -283,7 +297,7 @@ class Game {
     const w = pl.weapon;
     const d = dist(pl.x, pl.y, target.x, target.y);
     const range = (w.type === 'melee')
-      ? (w.reach + pl.radius + target.radius + 12)
+      ? (w.reach + pl.radius + pl.meleeReachBonus() + target.radius + 12)
       : ((w.arrowRange || 760) * 0.95);
     if (d > range) return;
     const ang = Math.atan2(target.y - pl.y, target.x - pl.x);
@@ -291,17 +305,24 @@ class Game {
   }
 
   _onAttackFired() {
-    const w = this.player.weapon;
+    const pl = this.player;
+    const w = pl.weapon;
     if (w.type === 'melee') {
-      const isThird = this.player.comboIndex === 2;
+      const isThird = pl.comboIndex === 2;
       this.effects.spawn('slash', {
-        x: this.player.x, y: this.player.y, angle: this.player.attackFacing,
-        reach: w.reach + this.player.radius + (isThird ? w.thirdHitReachBonus : 0),
+        x: pl.x, y: pl.y, angle: pl.attackFacing,
+        reach: w.reach + pl.radius + pl.meleeReachBonus() + (isThird ? w.thirdHitReachBonus : 0),
         half: w.halfAngle * (isThird ? 1.15 : 1),
         dur: 0.22, color: w.color
       });
     } else {
-      this._fireArrow(this.player.x, this.player.y, this.player.attackFacing, w.basicDamage, w.arrowKnockback, w.hitstun);
+      // 弓：随 Boss 升级射出多支箭（双发/三发…）
+      const n = pl.bowArrows();
+      const step = 0.10;
+      for (let i = 0; i < n; i++) {
+        const a = pl.attackFacing + (i - (n - 1) / 2) * step;
+        this._fireArrow(pl.x, pl.y, a, w.basicDamage, w.arrowKnockback, w.hitstun);
+      }
     }
   }
 
@@ -562,6 +583,8 @@ class Game {
       if (e.isBoss()) {
         this.bossAlive = false;
         this.player.hp = Math.min(this.player.maxHp, this.player.hp + 40);
+        this.player.bossUpgrade();   // 骑士晋级 + 武器强化
+        this._queueUpgradePopup();
       }
     }
     if (this.pendingBoons > 0 && this.state === 'playing') this._openBoonSelection();
@@ -633,6 +656,23 @@ class Game {
     else this.state = 'playing';
   }
 
+  // Boss 击败后的升级弹窗（骑士晋级 + 武器强化）
+  _queueUpgradePopup() {
+    const pl = this.player;
+    const lines = ['「' + pl.weapon.name + '」强化'];
+    if (pl.weapon.type === 'ranged') {
+      lines.push('每次射出 ' + pl.bowArrows() + ' 箭 · 弓身焕新');
+    } else {
+      lines.push('剑身加长 · 攻击范围扩大 · 锋芒焕新');
+    }
+    this.upgradePopup = { rankName: pl.rankName(), lines };
+    this.upgradePromptT = 0;
+    this.state = 'upgrade';
+    this.input.resetAll();
+    this.effects.spawn('shock', { x: pl.x, y: pl.y, maxR: 280, dur: 0.6, color: Config.Palette.olympusGoldLight });
+    this.flashT = 0.16;
+  }
+
   _pointInRect(p, r) { return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
 
   _restart() { this._initRun(); }
@@ -683,7 +723,7 @@ class Game {
   }
 
   _renderUI(ctx) {
-    if (this.state === 'playing' || this.state === 'boon' || this.state === 'dead') {
+    if (this.state === 'playing' || this.state === 'boon' || this.state === 'dead' || this.state === 'upgrade') {
       this._drawHud(ctx);
       this._drawBoonBar(ctx);
       this._drawBossBar(ctx);
@@ -695,8 +735,48 @@ class Game {
     }
     if (this.flashT > 0) this._drawFlash(ctx);
     if (this.state === 'weaponselect') this._drawWeaponSelect(ctx);
+    if (this.state === 'upgrade') this._drawUpgradeOverlay(ctx);
     if (this.state === 'boon') this._drawBoonOverlay(ctx);
     if (this.state === 'dead') this._drawDeathOverlay(ctx);
+  }
+
+  _drawUpgradeOverlay(ctx) {
+    const P = Config.Palette;
+    const cw = this.cssW, ch = this.cssH;
+    ctx.fillStyle = 'rgba(8,4,16,0.82)';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const pw = Math.min(cw - 56, 360), ph = 232;
+    const px = (cw - pw) / 2, py = (ch - ph) / 2;
+    ctx.fillStyle = 'rgba(24,14,38,0.96)';
+    ctx.fillRect(px, py, pw, ph);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = P.olympusGold;
+    ctx.strokeRect(px, py, pw, ph);
+
+    ctx.fillStyle = P.bloodRedLight;
+    ctx.font = 'bold 18px serif';
+    ctx.fillText('击败冥府守卫！', cw / 2, py + 34);
+
+    ctx.fillStyle = 'rgba(243,233,210,0.7)';
+    ctx.font = '13px sans-serif';
+    ctx.fillText('晋升为', cw / 2, py + 66);
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = 'bold 30px serif';
+    ctx.fillText(this.upgradePopup.rankName, cw / 2, py + 100);
+
+    ctx.fillStyle = P.textLight;
+    ctx.font = '14px sans-serif';
+    const lines = this.upgradePopup.lines;
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], cw / 2, py + 140 + i * 22);
+
+    if (this.upgradePromptT > 0.4 && Math.floor(this.upgradePromptT * 2) % 2 === 0) {
+      ctx.fillStyle = P.olympusGoldLight;
+      ctx.font = '15px serif';
+      ctx.fillText('轻触继续', cw / 2, py + ph - 22);
+    }
   }
 
   _drawFlash(ctx) {
