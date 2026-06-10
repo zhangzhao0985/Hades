@@ -19,6 +19,8 @@ class Projectile {
     this.hitstun = o.hitstun || 0.1;
     this.life = o.maxLife || 1;
     this.color = o.color || '#8fd0ff';
+    this.team = o.team || 'player';   // player | enemy
+    this.kind = o.kind || 'arrow';    // arrow | orb
   }
 
   update(dt) {
@@ -29,6 +31,7 @@ class Projectile {
   }
 
   draw(ctx) {
+    if (this.kind === 'orb') { this._drawOrb(ctx); return; }
     const len = 22, w = 4;
     const cos = Math.cos(this.angle), sin = Math.sin(this.angle);
     const tx = this.x + cos * len * 0.5, ty = this.y + sin * len * 0.5;
@@ -59,6 +62,29 @@ class Projectile {
     ctx.lineTo(tx - cos * 7 - px * 4, ty - sin * 7 - py * 4);
     ctx.closePath();
     ctx.fill();
+    ctx.restore();
+  }
+
+  // 敌方弹幕：发光能量球 + 拖尾
+  _drawOrb(ctx) {
+    const r = this.radius;
+    ctx.save();
+    // 拖尾
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = this.color;
+    ctx.lineWidth = r * 1.4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(this.x, this.y);
+    ctx.lineTo(this.x - this.vx * 0.03, this.y - this.vy * 0.03);
+    ctx.stroke();
+    // 球体
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = this.color;
+    ctx.beginPath(); ctx.arc(this.x, this.y, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.arc(this.x, this.y, r * 0.45, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 }

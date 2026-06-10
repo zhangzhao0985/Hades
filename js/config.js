@@ -75,9 +75,9 @@ const Config = {
     radius: 1300
   },
 
-  // 弹射物（弓箭等）对象池
+  // 弹射物（玩家弓箭 + 敌方弹幕 + 大招箭雨）对象池
   projectiles: {
-    poolSize: 96
+    poolSize: 220
   },
 
   // 普通攻击（扇形判定 + 三段连击）
@@ -144,31 +144,67 @@ const Config = {
     safeDist: 360
   },
 
-  // 敌人（普通 / 精英 / Boss）
+  // 敌人：数据驱动（tier 等级 / behavior 行为 / color 配色 / ranged 远程）
   enemy: {
     maxOnScreen: 30,        // 非 Boss 同屏硬上限
+    normalTypes: ['melee', 'shooter', 'brute'],
+    eliteTypes: ['elite', 'elite_caster'],
+    bossTypes: ['boss', 'boss_archer'],
+
+    // —— 普通 ——
     melee: {
-      radius: 26, speed: 152, maxHp: 40,
-      contactDamage: 12, contactCooldown: 0.9,
-      spawnTime: 0.5, knockbackDecay: 7, hitstunMin: 0.18,
-      knockbackResist: 1, stunnable: true
+      tier: 'normal', behavior: 'chaser', color: 'melee', feature: null,
+      radius: 26, speed: 152, maxHp: 40, contactDamage: 12, contactCooldown: 0.9,
+      spawnTime: 0.5, knockbackDecay: 7, hitstunMin: 0.18, knockbackResist: 1, stunnable: true
     },
+    shooter: {
+      tier: 'normal', behavior: 'shooter', color: 'shooter', feature: null,
+      radius: 24, speed: 122, maxHp: 30, contactDamage: 8, contactCooldown: 0.9,
+      spawnTime: 0.55, knockbackDecay: 7, hitstunMin: 0.16, knockbackResist: 1, stunnable: true,
+      ranged: { damage: 9, speed: 360, range: 560, cooldown: 1.9, count: 1, spread: 0, radius: 8, color: '#7cfcae', preferred: 380 }
+    },
+    brute: {
+      tier: 'normal', behavior: 'chaser', color: 'brute', feature: 'horns',
+      radius: 34, speed: 106, maxHp: 95, contactDamage: 18, contactCooldown: 1.0,
+      spawnTime: 0.7, knockbackDecay: 5, hitstunMin: 0.12, knockbackResist: 0.6, stunnable: true
+    },
+
+    // —— 精英 ——
     elite: {
-      radius: 38, speed: 138, maxHp: 160,
-      contactDamage: 20, contactCooldown: 1.0,
-      spawnTime: 0.7, knockbackDecay: 6, hitstunMin: 0.12,
-      knockbackResist: 0.5, stunnable: true
+      tier: 'elite', behavior: 'chaser', color: 'elite', feature: 'horns',
+      radius: 38, speed: 138, maxHp: 160, contactDamage: 20, contactCooldown: 1.0,
+      spawnTime: 0.7, knockbackDecay: 6, hitstunMin: 0.12, knockbackResist: 0.5, stunnable: true
     },
+    elite_caster: {
+      tier: 'elite', behavior: 'shooter', color: 'elite_caster', feature: 'horns',
+      radius: 36, speed: 122, maxHp: 150, contactDamage: 14, contactCooldown: 1.0,
+      spawnTime: 0.7, knockbackDecay: 6, hitstunMin: 0.12, knockbackResist: 0.5, stunnable: true,
+      ranged: { damage: 14, speed: 380, range: 640, cooldown: 1.5, count: 3, spread: Math.PI / 9, radius: 9, color: '#b07cff', preferred: 460 }
+    },
+
+    // —— Boss ——
     boss: {
-      radius: 72, speed: 96, maxHp: 1200,
-      contactDamage: 26, contactCooldown: 0.8,
-      spawnTime: 1.0, knockbackDecay: 6, hitstunMin: 0,
-      knockbackResist: 0.12, stunnable: false,
+      tier: 'boss', behavior: 'charger', color: 'boss', feature: 'crown',
+      radius: 72, speed: 96, maxHp: 1200, contactDamage: 26, contactCooldown: 0.8,
+      spawnTime: 1.0, knockbackDecay: 6, hitstunMin: 0, knockbackResist: 0.12, stunnable: false,
       chargeRange: 560, chargeCdMin: 3.5, chargeCdMax: 5.5,
       telegraphTime: 0.7, chargeSpeed: 780, chargeTime: 0.5,
-      recoverTime: 0.9, chargeDamageMul: 1.7,
-      phase2SpeedMul: 1.25, phase2CdMul: 0.6
+      recoverTime: 0.9, chargeDamageMul: 1.7, phase2SpeedMul: 1.25, phase2CdMul: 0.6
+    },
+    boss_archer: {
+      tier: 'boss', behavior: 'shooter', color: 'boss_archer', feature: 'crown',
+      radius: 64, speed: 108, maxHp: 1000, contactDamage: 22, contactCooldown: 0.8,
+      spawnTime: 1.0, knockbackDecay: 6, hitstunMin: 0, knockbackResist: 0.14, stunnable: false,
+      ranged: { damage: 16, speed: 430, range: 780, cooldown: 1.1, count: 5, spread: Math.PI / 5, radius: 10, color: '#ffd76a', preferred: 540 }
     }
+  },
+
+  // 每击败 1 个 Boss，刷怪强度提升
+  difficulty: {
+    normalCapPerBoss: 4,
+    eliteCapPerBoss: 1,
+    batchPerBoss: 1,
+    intervalScalePerBoss: 0.88   // 刷新间隔每级乘以该系数（更快）
   },
 
   // 镜头

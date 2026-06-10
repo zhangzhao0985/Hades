@@ -1,28 +1,23 @@
-// js/enemy.js —— 敌人：普通近战 / 精英 / Boss（kind 驱动）
+// js/enemy.js —— 敌人：数据驱动（tier 等级 / behavior 行为 / ranged 远程）
+// behavior: chaser（追击近战）/ shooter（保持距离放弹幕）/ charger（蓄力冲锋 Boss）
 // 状态机：spawn → (chase | telegraph | charge | recover) ↔ hurt → dead
-// Boss 不进入 hurt 硬直，拥有蓄力冲锋技能与二阶段。
 const Config = require('./config.js');
 const { drawCharacter, SKINS } = require('./sprites.js');
 const { clamp, len, damp } = require('./utils.js');
 
 let _eid = 0;
-
-// 各 kind 的配色
-function colorsOf(kind) {
-  const P = Config.Palette;
-  if (kind === 'elite') return { body: '#b5471f', light: '#ff8a3d' };
-  if (kind === 'boss') return { body: '#7a0e1a', light: '#e8453a' };
-  return { body: P.enemyBody, light: P.enemyBodyLight };
-}
-
 function rnd(a, b) { return a + Math.random() * (b - a); }
 
 class Enemy {
-  constructor(x, y, kind) {
-    this.kind = kind || 'melee';
-    const c = Config.enemy[this.kind];
+  constructor(x, y, type) {
+    this.type = type || 'melee';
+    const c = Config.enemy[this.type];
+    this.def = c;
     this.stats = c;
-    this.col = colorsOf(this.kind);
+    this.tier = c.tier;
+    this.behavior = c.behavior;
+    const sk = SKINS[c.color] || SKINS.melee;
+    this.col = { body: sk.body, light: sk.bodyLight };
 
     this.id = _eid++;
     this.x = x;
@@ -51,10 +46,15 @@ class Enemy {
     this.weakMul = 1;
     this.weakTimer = 0;
     this.deflectCd = 0;
+    this.swordHitCd = 0; // 玩家剑刃大招的每敌命中冷却
 
-    // Boss 专用
-    if (this.kind === 'boss') {
-      this.bossPhase = 1;
+    // 远程
+    this.wantsFire = false;
+    this.bossPhase = 1;
+    if (this.behavior === 'shooter') this.shootCd = rnd(0.4, c.ranged.cooldown);
+
+    // 冲锋 Boss 专用
+    if (this.behavior === 'charger') {
       this.chargeCd = rnd(c.chargeCdMin, c.chargeCdMax);
       this.teleTimer = 0;
       this.chargeTimer = 0;
@@ -66,16 +66,15 @@ class Enemy {
     this._killHandled = false;
   }
 
-  isBoss() { return this.kind === 'boss'; }
+  isBoss() { return this.tier === 'boss'; }
   isAlive() { return this.state !== 'dead'; }
   isGone() { return this.state === 'dead' && this.deadTimer <= 0; }
   canDamagePlayer() { return (this.state === 'chase' || this.state === 'charge') && this.contactCd <= 0; }
   canBeDeflected() { return this.state !== 'dead' && this.state !== 'spawn' && this.deflectCd <= 0; }
 
-  // 当前接触伤害（Boss 冲锋更痛；虚弱降低）
   contactDamage() {
     let d = this.stats.contactDamage;
-    if (this.kind === 'boss' && this.state === 'charge') d *= this.stats.chargeDamageMul;
+    if (this.behavior === 'charger' && this.state === 'charge') d *= this.stats.chargeDamageMul;
     return d * this.weakMul;
   }
 
@@ -95,8 +94,10 @@ class Enemy {
       this.vx = damp(this.vx, 0, this.stats.knockbackDecay, dt);
       this.vy = damp(this.vy, 0, this.stats.knockbackDecay, dt);
       if (this.hitstun <= 0) this.state = 'chase';
-    } else if (this.kind === 'boss') {
+    } else if (this.behavior === 'charger') {
       this._bossBehavior(dt, player);
+    } else if (this.behavior === 'shooter') {
+      this._shooterBehavior(dt, player);
     } else {
       this._chase(dt, player);
     }
@@ -104,7 +105,6 @@ class Enemy {
     this.x += this.vx * dt;
     this.y += this.vy * dt;
 
-    // 限制在竞技场内（Boss 冲锋撞墙则结束冲锋）
     const minX = room.x + room.wallThickness + this.radius;
     const maxX = room.x + room.width - room.wallThickness - this.radius;
     const minY = room.y + room.wallThickness + this.radius;
@@ -112,7 +112,7 @@ class Enemy {
     const hitWall = this.x < minX || this.x > maxX || this.y < minY || this.y > maxY;
     this.x = clamp(this.x, minX, maxX);
     this.y = clamp(this.y, minY, maxY);
-    if (this.kind === 'boss' && this.state === 'charge' && hitWall) {
+    if (this.behavior === 'charger' && this.state === 'charge' && hitWall) {
       this.state = 'recover';
       this.recoverTimer = this.stats.recoverTime;
       this.vx = this.vy = 0;
@@ -127,6 +127,32 @@ class Enemy {
     this.vx = dx / l * this.speed;
     this.vy = dy / l * this.speed;
     this.animTime += dt * 6;
+  }
+
+  // 远程：保持在偏好距离放弹幕（近了后撤，远了靠近）
+  _shooterBehavior(dt, player) {
+    const r = this.def.ranged;
+    const dx = player.x - this.x, dy = player.y - this.y;
+    const d = len(dx, dy) || 1;
+    this.facing = Math.atan2(dy, dx);
+    const pref = r.preferred || r.range * 0.7;
+    let mv = 0;
+    if (d > pref * 1.12) mv = this.speed;
+    else if (d < pref * 0.82) mv = -this.speed * 0.7;
+    this.vx = dx / d * mv;
+    this.vy = dy / d * mv;
+    this.animTime += dt * 5;
+
+    let cdMul = 1;
+    if (this.tier === 'boss') {
+      this.bossPhase = this.hp < this.maxHp * 0.5 ? 2 : 1;
+      if (this.bossPhase === 2) cdMul = 0.6;
+    }
+    this.shootCd -= dt;
+    if (this.shootCd <= 0 && d < r.range) {
+      this.wantsFire = true;
+      this.shootCd = r.cooldown * cdMul;
+    }
   }
 
   _bossBehavior(dt, player) {
@@ -161,10 +187,7 @@ class Enemy {
       this.vx = this.chargeDirX * s.chargeSpeed;
       this.vy = this.chargeDirY * s.chargeSpeed;
       this.chargeTimer -= dt;
-      if (this.chargeTimer <= 0) {
-        this.state = 'recover';
-        this.recoverTimer = s.recoverTime;
-      }
+      if (this.chargeTimer <= 0) { this.state = 'recover'; this.recoverTimer = s.recoverTime; }
     } else if (this.state === 'recover') {
       this.vx = damp(this.vx, 0, 8, dt);
       this.vy = damp(this.vy, 0, 8, dt);
@@ -203,7 +226,6 @@ class Enemy {
     this.vx = dx / l * kbf;
     this.vy = dy / l * kbf;
 
-    // 可硬直的敌人进入 hurt（不打断 Boss 的冲锋/蓄力）
     if (this.stats.stunnable && this.state !== 'charge' && this.state !== 'telegraph') {
       this.hitstun = Math.max(this.stats.hitstunMin, hitstun);
       this.state = 'hurt';
@@ -226,12 +248,9 @@ class Enemy {
   }
 
   // ---- 绘制 ----
-  _feature() { return this.kind === 'elite' ? 'horns' : (this.kind === 'boss' ? 'crown' : null); }
-  _colors() { return SKINS[this.kind] || SKINS.melee; }
-
   draw(ctx) {
-    const colors = this._colors();
-    const feature = this._feature();
+    const colors = SKINS[this.def.color] || SKINS.melee;
+    const feature = this.def.feature;
 
     if (this.state === 'dead') {
       const t = clamp(this.deadTimer / (this.isBoss() ? 0.7 : 0.35), 0, 1);
@@ -250,8 +269,8 @@ class Enemy {
       alpha = t;
     }
 
-    if (this.kind === 'boss' && this.state === 'telegraph') this._drawTelegraph(ctx);
-    if (this.kind === 'boss' && this.state === 'charge') this._drawChargeTrail(ctx);
+    if (this.behavior === 'charger' && this.state === 'telegraph') this._drawTelegraph(ctx);
+    if (this.behavior === 'charger' && this.state === 'charge') this._drawChargeTrail(ctx);
 
     const moving = this.state === 'chase' || this.state === 'charge';
     drawCharacter(ctx, {
@@ -267,7 +286,6 @@ class Enemy {
   }
 
   _drawTelegraph(ctx) {
-    // 红色瞄准线，预示冲锋方向
     const fx = Math.cos(this.facing), fy = Math.sin(this.facing);
     const pulse = 0.5 + 0.5 * Math.sin(this.teleTimer * 18);
     ctx.save();
@@ -314,7 +332,7 @@ class Enemy {
     const x = this.x - w / 2, y = this.y - this.radius - 16;
     ctx.fillStyle = P.hpBack;
     ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
-    ctx.fillStyle = this.kind === 'elite' ? P.lavaGlow : P.hpFill;
+    ctx.fillStyle = this.tier === 'elite' ? P.lavaGlow : P.hpFill;
     ctx.fillRect(x, y, w * clamp(this.hp / this.maxHp, 0, 1), h);
   }
 }

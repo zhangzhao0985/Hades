@@ -252,12 +252,16 @@ function drawCharacter(ctx, o) {
   ctx.restore();
 }
 
-// 颜色预设（主角=浅蓝骑士）
+// 颜色预设（主角=浅蓝骑士；敌人按种类配色）
 const SKINS = {
   player: { body: '#4f93d6', bodyLight: '#8fd0ff', outline: '#0c2438', skin: '#cfe8ff', hair: '#24527a', accent: '#ffe08a', eye: '#173049', weapon: '#ffe08a', limb: '#356aa0' },
   melee: { body: '#6a3d8f', bodyLight: '#9b6fc4', outline: '#140a20', skin: '#7a4c9e', hair: null, accent: null, eye: '#ffd76a', limb: '#4a2a6a' },
+  shooter: { body: '#1f6f5a', bodyLight: '#46c79e', outline: '#06160f', skin: '#1f6f5a', hair: null, accent: null, eye: '#aef0d0', limb: '#114436' },
+  brute: { body: '#4a2a6a', bodyLight: '#7a4ca0', outline: '#0a0418', skin: '#4a2a6a', hair: null, accent: null, eye: '#ff9e3d', limb: '#2e1846' },
   elite: { body: '#b5471f', bodyLight: '#ff8a3d', outline: '#250a05', skin: '#c4561f', hair: null, accent: null, eye: '#ffe08a', limb: '#7a2e12' },
-  boss: { body: '#7a0e1a', bodyLight: '#e8453a', outline: '#180306', skin: '#8a1320', hair: null, accent: null, eye: '#ffd76a', limb: '#4a060e' }
+  elite_caster: { body: '#5a3aa0', bodyLight: '#9b7cff', outline: '#0c0622', skin: '#5a3aa0', hair: null, accent: null, eye: '#cbb3ff', limb: '#3a2470' },
+  boss: { body: '#7a0e1a', bodyLight: '#e8453a', outline: '#180306', skin: '#8a1320', hair: null, accent: null, eye: '#ffd76a', limb: '#4a060e' },
+  boss_archer: { body: '#1f5a2a', bodyLight: '#56c46a', outline: '#06160a', skin: '#1f5a2a', hair: null, accent: null, eye: '#ffd76a', limb: '#0f3a18' }
 };
 
 module.exports = { drawCharacter, SKINS };
