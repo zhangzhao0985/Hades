@@ -75,9 +75,9 @@ const Config = {
     radius: 1300
   },
 
-  // 弹射物（玩家弓箭 + 敌方弹幕 + 大招箭雨）对象池
+  // 弹射物（玩家弓箭 + 敌方弹幕 + 大招箭雨 + Boss 环形弹幕）对象池
   projectiles: {
-    poolSize: 220
+    poolSize: 260
   },
 
   // 普通攻击（扇形判定 + 三段连击）
@@ -189,13 +189,17 @@ const Config = {
       spawnTime: 1.0, knockbackDecay: 6, hitstunMin: 0, knockbackResist: 0.12, stunnable: false,
       chargeRange: 560, chargeCdMin: 3.5, chargeCdMax: 5.5,
       telegraphTime: 0.7, chargeSpeed: 780, chargeTime: 0.5,
-      recoverTime: 0.9, chargeDamageMul: 1.7, phase2SpeedMul: 1.25, phase2CdMul: 0.6
+      recoverTime: 0.9, chargeDamageMul: 1.7, phase2SpeedMul: 1.25, phase2CdMul: 0.6,
+      // 专属技能：践踏冲击波 / 召唤爪牙（交替）
+      skillCdMin: 6, skillCdMax: 9, slamRadius: 430, slamDamage: 24, summonCount: 3
     },
     boss_archer: {
       tier: 'boss', behavior: 'shooter', color: 'boss_archer', feature: 'crown',
       radius: 64, speed: 108, maxHp: 1000, contactDamage: 22, contactCooldown: 0.8,
       spawnTime: 1.0, knockbackDecay: 6, hitstunMin: 0, knockbackResist: 0.14, stunnable: false,
-      ranged: { damage: 16, speed: 430, range: 780, cooldown: 1.1, count: 5, spread: Math.PI / 5, radius: 10, color: '#ffd76a', preferred: 540 }
+      ranged: { damage: 16, speed: 430, range: 780, cooldown: 1.1, count: 5, spread: Math.PI / 5, radius: 10, color: '#ffd76a', preferred: 540 },
+      // 专属技能：360° 环形弹幕（二阶段更密并旋转）
+      skillCdMin: 5, skillCdMax: 7.5, ringCountP1: 14, ringCountP2: 22
     }
   },
 

@@ -53,6 +53,11 @@ class Enemy {
     this.bossPhase = 1;
     if (this.behavior === 'shooter') this.shootCd = rnd(0.4, c.ranged.cooldown);
 
+    // Boss 专属技能
+    this.skillRequest = false;
+    this.skillToggle = 0;
+    if (c.skillCdMin != null) this.skillCd = rnd(c.skillCdMin, c.skillCdMax);
+
     // 冲锋 Boss 专用
     if (this.behavior === 'charger') {
       this.chargeCd = rnd(c.chargeCdMin, c.chargeCdMax);
@@ -100,6 +105,16 @@ class Enemy {
       this._shooterBehavior(dt, player);
     } else {
       this._chase(dt, player);
+    }
+
+    // Boss 专属技能计时（仅在普通追击/游走时触发，不打断冲锋）
+    if (this.skillCd != null && this.state === 'chase') {
+      this.skillCd -= dt;
+      if (this.skillCd <= 0) {
+        this.skillRequest = true;
+        const mul = (this.tier === 'boss' && this.bossPhase === 2) ? 0.7 : 1;
+        this.skillCd = rnd(this.def.skillCdMin, this.def.skillCdMax) * mul;
+      }
     }
 
     this.x += this.vx * dt;

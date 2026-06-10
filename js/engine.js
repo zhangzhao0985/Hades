@@ -161,6 +161,7 @@ class Game {
     this.runBossKills = 0;
     this.waveLevel = 0;
     this.swordNova = null;
+    this.hazards = [];
     this.enemies.length = 0;
     this.projectiles.clear();
     for (let i = 0; i < sp.initialNormals; i++) this._spawnEnemy(this._pick(Config.enemy.normalTypes));
@@ -346,6 +347,7 @@ class Game {
       const e = this.enemies[i];
       e.update(dt, this.player, this.arena);
       if (e.wantsFire) { e.wantsFire = false; this._enemyFire(e); }
+      if (e.skillRequest) { e.skillRequest = false; this._bossSkill(e); }
     }
 
     this.projectiles.update(dt);
@@ -355,6 +357,7 @@ class Game {
     this._updateStatusEffects(dt);
     this._resolvePlayerAttack();
     this._updateSwordNova(dt);
+    this._updateHazards(dt);
     this._resolveEnemyContact();
     this._handleKills();
 
@@ -456,6 +459,98 @@ class Game {
         radius: r.radius || 9, damage: r.damage, knockback: 0, hitstun: 0.1,
         maxLife: r.range / r.speed, color: r.color || '#ff6f5e', team: 'enemy', kind: 'orb'
       });
+    }
+  }
+
+  // ---- Boss 专属技能 ----
+  _bossSkill(e) {
+    if (e.type === 'boss') {
+      if (e.skillToggle % 2 === 0) this._bossSlam(e);
+      else this._bossSummon(e);
+      e.skillToggle++;
+    } else if (e.type === 'boss_archer') {
+      this._bossRing(e);
+    }
+  }
+
+  // 冲锋 Boss：践踏 → 扩散冲击波（站位踩中即受伤，可走位/闪避躲开）
+  _bossSlam(e) {
+    const d = e.def;
+    this.hazards.push({ x: e.x, y: e.y, r: e.radius * 0.6, maxR: d.slamRadius, speed: 560, band: 34, damage: d.slamDamage, hitDone: false, color: '#ff6a2b' });
+    this.effects.spawn('shock', { x: e.x, y: e.y, maxR: 130, dur: 0.3, color: '#ffae42' });
+    this.audio.play('bossSpawn');
+    this._narrate('冥府守卫践踏大地！', 1.6);
+    this.addShake(0.55);
+  }
+
+  // 冲锋 Boss：召唤爪牙
+  _bossSummon(e) {
+    const n = e.def.summonCount || 3;
+    for (let i = 0; i < n; i++) {
+      if (this._nonBossCount() >= Config.enemy.maxOnScreen) break;
+      const ang = Math.random() * Math.PI * 2, rr = e.radius + 60;
+      this._spawnEnemyAt(this._pick(Config.enemy.normalTypes), e.x + Math.cos(ang) * rr, e.y + Math.sin(ang) * rr);
+    }
+    this._narrate('冥府守卫唤来爪牙！', 1.8);
+    this.addShake(0.3);
+  }
+
+  // 弓手 Boss：360° 环形弹幕（二阶段更密并旋转）
+  _bossRing(e) {
+    const r = e.def.ranged;
+    const n = e.bossPhase === 2 ? (e.def.ringCountP2 || 22) : (e.def.ringCountP1 || 14);
+    const off = (e.skillToggle || 0) * 0.18;
+    const spd = r.speed * 0.85;
+    for (let i = 0; i < n; i++) {
+      const a = i * (Math.PI * 2 / n) + off;
+      this.projectiles.spawn({
+        x: e.x + Math.cos(a) * e.radius, y: e.y + Math.sin(a) * e.radius,
+        vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, angle: a,
+        radius: r.radius || 10, damage: r.damage, knockback: 0, hitstun: 0.1,
+        maxLife: (r.range * 1.15) / spd, color: r.color, team: 'enemy', kind: 'orb'
+      });
+    }
+    e.skillToggle = (e.skillToggle || 0) + 1;
+    this.audio.play('attack');
+    this.addShake(0.25);
+  }
+
+  // 地面冲击波危害：扩散环，玩家踩到环带即受伤（每个危害只命中一次）
+  _updateHazards(dt) {
+    if (!this.hazards) return;
+    const pl = this.player;
+    for (let i = this.hazards.length - 1; i >= 0; i--) {
+      const h = this.hazards[i];
+      h.r += h.speed * dt;
+      if (!h.hitDone && !pl.isInvincible()) {
+        const d = dist(pl.x, pl.y, h.x, h.y);
+        if (Math.abs(d - h.r) < h.band + pl.radius) {
+          if (pl.takeDamage(h.damage, h.x, h.y)) {
+            this.audio.play('hurt');
+            pl.gainEnergy(Config.player.energyOnHurt);
+            this.addShake(0.4);
+          }
+          h.hitDone = true;
+        }
+      }
+      if (h.r >= h.maxR) this.hazards.splice(i, 1);
+    }
+  }
+
+  _drawHazards(ctx) {
+    if (!this.hazards) return;
+    for (let i = 0; i < this.hazards.length; i++) {
+      const h = this.hazards[i];
+      const fade = 1 - h.r / h.maxR;
+      ctx.save();
+      ctx.globalAlpha = 0.7 * fade;
+      ctx.strokeStyle = h.color;
+      ctx.lineWidth = 8;
+      ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 0.22 * fade;
+      ctx.lineWidth = h.band * 2;
+      ctx.beginPath(); ctx.arc(h.x, h.y, h.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
     }
   }
 
@@ -639,8 +734,13 @@ class Game {
 
   _spawnEnemy(type) {
     const p = this._arenaSpawnPos();
-    const e = new Enemy(p.x, p.y, type);
+    return this._spawnEnemyAt(type, p.x, p.y);
+  }
+
+  _spawnEnemyAt(type, x, y) {
+    const e = new Enemy(x, y, type);
     this.enemies.push(e);
+    const p = { x, y };
     if (e.isBoss()) {
       this.bossAlive = true;
       this.bossWarnT = 2.5;
@@ -1023,6 +1123,7 @@ class Game {
       e.draw(ctx);
     }
     this.projectiles.draw(ctx, view);
+    if (this.state === 'playing' && this.hazards && this.hazards.length) this._drawHazards(ctx);
     this.player.draw(ctx);
     if (this.state === 'playing' && this.swordNova && this.swordNova.active) this._drawSwordNova(ctx);
     this.effects.draw(ctx, view);
