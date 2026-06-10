@@ -64,8 +64,8 @@ const Config = {
     knockbackTaken: 160,    // 受击被击退的速度
     staggerTime: 0.14,      // 受击短硬直（失控时长）
     maxEnergy: 100,         // 神怒能量上限
-    energyPerHit: 6,        // 每次命中获得能量
-    energyOnHurt: 9         // 受击获得能量
+    energyPerHit: 3,        // 每次命中获得能量（积攒速度延长一倍）
+    energyOnHurt: 4         // 受击获得能量
   },
 
   // 神怒大招（满能量释放，全屏伤害）
@@ -127,6 +127,14 @@ const Config = {
     wallThickness: 40
   },
 
+  // 地面装饰（草丛/花朵/蘑菇）：有体积、碰到会晃动，但不影响移动
+  decor: {
+    count: 120,
+    touchRadius: 30,
+    wobbleTime: 0.5,
+    types: ['grass', 'grass', 'grass', 'flower', 'flower', 'mushroom']
+  },
+
   // 刷怪导演：普通怪持续补充，精英/Boss 不定时随机刷新
   spawn: {
     normalCap: 20,
@@ -148,6 +156,8 @@ const Config = {
   enemy: {
     maxOnScreen: 30,        // 非 Boss 同屏硬上限
     normalTypes: ['melee', 'shooter', 'brute'],
+    // 普通怪加权刷新池（绿色射手 shooter 权重减半）
+    normalSpawn: ['melee', 'melee', 'brute', 'brute', 'dog', 'dog', 'spider', 'spider', 'bloat', 'shooter'],
     eliteTypes: ['elite', 'elite_caster'],
     bossTypes: ['boss', 'boss_archer'],
 
@@ -167,6 +177,29 @@ const Config = {
       tier: 'normal', behavior: 'chaser', color: 'brute', feature: 'horns',
       radius: 34, speed: 106, maxHp: 95, contactDamage: 18, contactCooldown: 1.0,
       spawnTime: 0.7, knockbackDecay: 5, hitstunMin: 0.12, knockbackResist: 0.6, stunnable: true
+    },
+    // 野狗：会猛冲（复用 charger 行为，参数更轻快）
+    dog: {
+      tier: 'normal', behavior: 'charger', color: 'dog', feature: null, shape: 'beast',
+      radius: 22, speed: 168, maxHp: 34, contactDamage: 12, contactCooldown: 0.8,
+      spawnTime: 0.5, knockbackDecay: 7, hitstunMin: 0.12, knockbackResist: 0.8, stunnable: true,
+      chargeRange: 460, chargeCdMin: 2.2, chargeCdMax: 3.6,
+      telegraphTime: 0.4, chargeSpeed: 720, chargeTime: 0.32,
+      recoverTime: 0.5, chargeDamageMul: 1.6, phase2SpeedMul: 1, phase2CdMul: 1
+    },
+    // 蜘蛛：近距离吐蛛丝，命中使玩家减速 30%
+    spider: {
+      tier: 'normal', behavior: 'shooter', color: 'spider', feature: null, shape: 'spider',
+      radius: 24, speed: 132, maxHp: 32, contactDamage: 8, contactCooldown: 0.9,
+      spawnTime: 0.55, knockbackDecay: 7, hitstunMin: 0.14, knockbackResist: 1, stunnable: true,
+      ranged: { damage: 5, speed: 330, range: 340, cooldown: 2.0, count: 1, spread: 0, radius: 9, color: '#dfeec0', preferred: 280, slowMul: 0.7, slowDur: 2.5 }
+    },
+    // 肥胖怪：贴近后原地蓄力 2 秒自爆
+    bloat: {
+      tier: 'normal', behavior: 'bloater', color: 'bloat', feature: null, shape: 'blob',
+      radius: 36, speed: 92, maxHp: 70, contactDamage: 0, contactCooldown: 1.0,
+      spawnTime: 0.6, knockbackDecay: 6, hitstunMin: 0.1, knockbackResist: 0.5, stunnable: true,
+      fuseTime: 2.0, explodeRadius: 170, explodeDamage: 30
     },
 
     // —— 精英 ——

@@ -10,7 +10,8 @@ const FLOOR_TINT = {
   normal: ['#241334', '#1c1330'],
   elite:  ['#3a1530', '#1c1330'],
   shop:   ['#2c2614', '#1c1330'],
-  boss:   ['#3a0e14', '#1c0a10']
+  boss:   ['#3a0e14', '#1c0a10'],
+  arena:  ['#6fae5a', '#4e8a3e']   // 浅草绿
 };
 
 class Room {
@@ -115,9 +116,9 @@ class Room {
       lineTop = Math.max(y, view.y0); lineBot = Math.min(y + h, view.y1);
       lineLeft = Math.max(x, view.x0); lineRight = Math.min(x + w, view.x1);
     }
-    ctx.strokeStyle = P.floorLine;
+    ctx.strokeStyle = this.type === 'arena' ? '#4e8a3e' : P.floorLine;
     ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.45;
+    ctx.globalAlpha = this.type === 'arena' ? 0.35 : 0.45;
     ctx.beginPath();
     for (let gx = gx0; gx < gx1; gx += step) { ctx.moveTo(gx, lineTop); ctx.lineTo(gx, lineBot); }
     for (let gy = gy0; gy < gy1; gy += step) { ctx.moveTo(lineLeft, gy); ctx.lineTo(lineRight, gy); }

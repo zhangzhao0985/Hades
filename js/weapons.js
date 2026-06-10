@@ -5,8 +5,9 @@ const WEAPONS = {
     id: 'sword', name: '冥钢之剑', short: '剑', type: 'melee',
     color: '#ffe08a',
     basicDamage: 18,
-    // 近战扇形 + 三连击时序
-    reach: 100, halfAngle: Math.PI / 3,
+    bonusHp: 30, bonusArmor: 3,   // 选剑：+30 生命、+3 护甲
+    // 近战扇形 + 三连击时序（攻击距离 +50%）
+    reach: 150, halfAngle: Math.PI / 3,
     windup: 0.05, active: 0.12, recover: 0.15, gap: 0.02, comboWindow: 0.45,
     knockback: 230, hitstun: 0.3, moveScale: 0.45,
     thirdHitDamageBonus: 12, thirdHitReachBonus: 26, thirdHitKnockbackBonus: 170,
@@ -18,6 +19,7 @@ const WEAPONS = {
     id: 'bow', name: '夜枭之弓', short: '弓', type: 'ranged',
     color: '#8fd0ff',
     basicDamage: 13,
+    bonusHp: 0, bonusArmor: 0,
     // 远程速射
     fireInterval: 0.26,            // 连射间隔（按住普攻的射速）
     windup: 0.02, active: 0.05, recover: 0.06, moveScale: 0.7,

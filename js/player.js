@@ -37,6 +37,10 @@ class Player {
     this.energy = 0;
     this.maxEnergy = Config.player.maxEnergy;
 
+    this.armor = 0;        // 护甲：每次受击的固定减伤
+    this.slowMul = 1;      // 减速倍率（蛛丝）
+    this.slowTimer = 0;
+
     // Boss 击败成长：骑士等级 + 武器升级次数
     this.rank = 0;        // 0~5，对应六等骑士
     this.weaponUp = 0;    // 当前武器随 Boss 击败累计的升级次数
@@ -100,6 +104,7 @@ class Player {
     if (this.attackCd > 0) this.attackCd -= dt;
     if (this.dashCd > 0) this.dashCd -= dt;
     if (this.specialCd > 0) this.specialCd -= dt;
+    if (this.slowTimer > 0) { this.slowTimer -= dt; if (this.slowTimer <= 0) this.slowMul = 1; }
     this.timeSinceSwing += dt;
 
     if (this.staminaDelay > 0) this.staminaDelay -= dt;
@@ -120,7 +125,7 @@ class Player {
       this.vx = damp(this.vx, 0, 10, dt);
       this.vy = damp(this.vy, 0, 10, dt);
     } else {
-      const moveScale = this.attacking ? this.weapon.moveScale : 1;
+      const moveScale = (this.attacking ? this.weapon.moveScale : 1) * this.slowMul;
       const targetVx = js.dx * this.speed * moveScale;
       const targetVy = js.dy * this.speed * moveScale;
       this.vx = damp(this.vx, targetVx, Config.player.moveDamp, dt);
@@ -231,18 +236,27 @@ class Player {
     };
   }
 
-  takeDamage(dmg, fromX, fromY) {
+  // opts.noKnockback：被飞行物击中时不击退、不改变移动
+  takeDamage(dmg, fromX, fromY, opts) {
     if (this.dead || this.isInvincible()) return false;
-    this.hp -= dmg;
+    const reduced = Math.max(1, dmg - this.armor); // 护甲减伤
+    this.hp -= reduced;
     this.invuln = Config.player.hitInvuln;
-    this.stagger = Config.player.staggerTime;
-    const dx = this.x - fromX, dy = this.y - fromY;
-    const l = len(dx, dy) || 1;
-    const f = Config.player.knockbackTaken;
-    this.vx = dx / l * f;
-    this.vy = dy / l * f;
+    if (!(opts && opts.noKnockback)) {
+      this.stagger = Config.player.staggerTime;
+      const dx = this.x - fromX, dy = this.y - fromY;
+      const l = len(dx, dy) || 1;
+      const f = Config.player.knockbackTaken;
+      this.vx = dx / l * f;
+      this.vy = dy / l * f;
+    }
     if (this.hp <= 0) { this.hp = 0; this.dead = true; }
     return true;
+  }
+
+  applySlow(mul, dur) {
+    this.slowMul = Math.min(this.slowMul, mul);
+    this.slowTimer = Math.max(this.slowTimer, dur);
   }
 
   draw(ctx) {

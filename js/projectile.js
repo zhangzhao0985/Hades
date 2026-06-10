@@ -21,6 +21,8 @@ class Projectile {
     this.color = o.color || '#8fd0ff';
     this.team = o.team || 'player';   // player | enemy
     this.kind = o.kind || 'arrow';    // arrow | orb
+    this.slow = o.slow || null;       // 蛛丝减速 { mul, dur }
+    this.block = !!o.block;           // 玩家弹是否能格挡敌方飞行物
   }
 
   update(dt) {

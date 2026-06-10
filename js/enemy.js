@@ -58,6 +58,10 @@ class Enemy {
     this.skillToggle = 0;
     if (c.skillCdMin != null) this.skillCd = rnd(c.skillCdMin, c.skillCdMax);
 
+    // 肥胖怪自爆
+    this.wantsExplode = false;
+    this.fuseTimer = 0;
+
     // 冲锋 Boss 专用
     if (this.behavior === 'charger') {
       this.chargeCd = rnd(c.chargeCdMin, c.chargeCdMax);
@@ -103,6 +107,8 @@ class Enemy {
       this._bossBehavior(dt, player);
     } else if (this.behavior === 'shooter') {
       this._shooterBehavior(dt, player);
+    } else if (this.behavior === 'bloater') {
+      this._bloaterBehavior(dt, player);
     } else {
       this._chase(dt, player);
     }
@@ -167,6 +173,29 @@ class Enemy {
     if (this.shootCd <= 0 && d < r.range) {
       this.wantsFire = true;
       this.shootCd = r.cooldown * cdMul;
+    }
+  }
+
+  // 肥胖怪：贴近 → 原地蓄力 fuseTime 秒 → 自爆
+  _bloaterBehavior(dt, player) {
+    const d = this.def;
+    if (this.state === 'fuse') {
+      this.vx = this.vy = 0;
+      this.fuseTimer -= dt;
+      if (this.fuseTimer <= 0) this.wantsExplode = true;
+      return;
+    }
+    const dx = player.x - this.x, dy = player.y - this.y;
+    const l = len(dx, dy) || 1;
+    this.facing = Math.atan2(dy, dx);
+    if (l <= this.radius + 58) {
+      this.state = 'fuse';
+      this.fuseTimer = d.fuseTime;
+      this.vx = this.vy = 0;
+    } else {
+      this.vx = dx / l * this.speed;
+      this.vy = dy / l * this.speed;
+      this.animTime += dt * 6;
     }
   }
 
@@ -266,13 +295,15 @@ class Enemy {
   draw(ctx) {
     const colors = SKINS[this.def.color] || SKINS.melee;
     const feature = this.def.feature;
+    const shape = this.def.shape;
+    const fuse = (this.type === 'bloat' && this.state === 'fuse') ? clamp(1 - this.fuseTimer / this.def.fuseTime, 0, 1) : 0;
 
     if (this.state === 'dead') {
       const t = clamp(this.deadTimer / (this.isBoss() ? 0.7 : 0.35), 0, 1);
       drawCharacter(ctx, {
         x: this.x, y: this.y, r: this.radius * (0.6 + 0.4 * t),
         facing: this.facing, walk: this.animTime, moving: false,
-        colors, feature, glowEyes: true, alpha: t
+        colors, feature, glowEyes: true, alpha: t, shape, fuse
       });
       return;
     }
@@ -291,7 +322,7 @@ class Enemy {
     drawCharacter(ctx, {
       x: this.x, y: this.y, r: this.radius * scale,
       facing: this.facing, walk: this.animTime, moving,
-      colors, feature, glowEyes: true, alpha
+      colors, feature, glowEyes: true, alpha, shape, fuse
     });
 
     if (this.state !== 'spawn') {

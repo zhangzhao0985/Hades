@@ -45,6 +45,13 @@ function drawCharacter(ctx, o) {
   ctx.fill();
   ctx.restore();
 
+  // 非人形：野狗 / 蜘蛛 / 肥胖怪
+  if (o.shape && o.shape !== 'humanoid') {
+    _drawCreature(ctx, o, x, y, r, c, dir, sw, ow);
+    ctx.restore();
+    return;
+  }
+
   const feetY = y + r * 1.02;
   const hipY = y + r * 0.30;
   const shoulderY = y - r * 0.30;
@@ -252,6 +259,87 @@ function drawCharacter(ctx, o) {
   ctx.restore();
 }
 
+function _eyes(ctx, ex, ey, er, color, n, spread) {
+  ctx.fillStyle = color;
+  for (let i = 0; i < n; i++) {
+    const off = (i - (n - 1) / 2) * spread;
+    ctx.beginPath(); ctx.arc(ex, ey + off, er, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function _drawCreature(ctx, o, x, y, r, c, dir, sw, ow) {
+  if (o.shape === 'beast') {
+    // 野狗：横身 + 四腿 + 前伸的头
+    const by = y, bodyLen = r * 1.7, bodyH = r * 0.82;
+    const backX = x - dir * bodyLen * 0.42, frontX = x + dir * bodyLen * 0.42;
+    const feetY = y + r * 0.98;
+    capsule(ctx, backX, by, frontX, by, bodyH, c.body, c.outline, ow);
+    capsule(ctx, backX, by - bodyH * 0.1, backX - dir * r * 0.7, by - r * 0.5, r * 0.13, c.limb, c.outline, ow * 0.7); // 尾
+    const legs = [[backX - dir * r * 0.05, 1], [backX + dir * r * 0.35, -1], [frontX - dir * r * 0.25, 1], [frontX + dir * r * 0.05, -1]];
+    for (const [lx, sgn] of legs) capsule(ctx, lx, by + bodyH * 0.2, lx + sw * r * 0.32 * sgn, feetY, r * 0.18, c.limb, c.outline, ow * 0.8);
+    const hx = frontX + dir * r * 0.45, hy = by - r * 0.28, hr = r * 0.58;
+    // 耳
+    ctx.fillStyle = c.body;
+    for (const s of [-0.2, 0.5]) {
+      ctx.beginPath();
+      ctx.moveTo(hx - dir * hr * 0.2, hy - hr * 0.7);
+      ctx.lineTo(hx - dir * hr * 0.2 + dir * s * hr, hy - hr * 1.5);
+      ctx.lineTo(hx + dir * hr * 0.3, hy - hr * 0.5);
+      ctx.closePath(); ctx.fill(); ctx.lineWidth = ow * 0.7; ctx.strokeStyle = c.outline; ctx.stroke();
+    }
+    capsule(ctx, hx, hy + hr * 0.15, hx + dir * hr * 1.0, hy + hr * 0.35, r * 0.24, c.body, c.outline, ow * 0.7); // 口鼻
+    ctx.beginPath(); ctx.arc(hx, hy, hr, 0, Math.PI * 2); ctx.fillStyle = c.bodyLight; ctx.fill(); ctx.lineWidth = ow; ctx.strokeStyle = c.outline; ctx.stroke();
+    _eyes(ctx, hx + dir * hr * 0.25, hy - hr * 0.1, hr * 0.16, c.eye, 1, 0);
+    return;
+  }
+
+  if (o.shape === 'spider') {
+    // 蜘蛛：圆腹 + 八条折腿 + 前端头与红眼
+    const bodyR = r * 0.8;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 8; i++) {
+      const side = i < 4 ? -1 : 1;
+      const k = i % 4;
+      const a = (-0.5 + k * 0.45) * 1.0; // 抬升角
+      const reach = r * (1.2 + 0.1 * Math.sin(sw + i));
+      const midx = x + side * dir * r * 0.5, midy = y - bodyR * 0.2 - Math.cos(a) * r * 0.3;
+      const tipx = x + side * dir * reach, tipy = y + r * 0.9;
+      ctx.lineWidth = r * 0.12 + ow;
+      ctx.strokeStyle = c.outline;
+      ctx.beginPath(); ctx.moveTo(x + side * dir * bodyR * 0.5, y - bodyR * 0.1); ctx.lineTo(midx, midy); ctx.lineTo(tipx, tipy); ctx.stroke();
+      ctx.lineWidth = r * 0.12;
+      ctx.strokeStyle = c.limb;
+      ctx.beginPath(); ctx.moveTo(x + side * dir * bodyR * 0.5, y - bodyR * 0.1); ctx.lineTo(midx, midy); ctx.lineTo(tipx, tipy); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(x, y, bodyR, 0, Math.PI * 2); ctx.fillStyle = c.body; ctx.fill(); ctx.lineWidth = ow; ctx.strokeStyle = c.outline; ctx.stroke();
+    const hx = x + dir * bodyR * 0.85;
+    ctx.beginPath(); ctx.arc(hx, y, bodyR * 0.5, 0, Math.PI * 2); ctx.fillStyle = c.bodyLight; ctx.fill(); ctx.stroke();
+    _eyes(ctx, hx + dir * bodyR * 0.15, y - bodyR * 0.18, bodyR * 0.12, c.eye, 2, bodyR * 0.34);
+    _eyes(ctx, hx + dir * bodyR * 0.35, y, bodyR * 0.09, c.eye, 2, bodyR * 0.22);
+    return;
+  }
+
+  // blob：肥胖怪，蓄力时膨胀变红
+  const fuse = o.fuse || 0;
+  const inflate = 1 + fuse * 0.28;
+  const R = r * 1.08 * inflate;
+  const red = fuse > 0 && Math.sin(fuse * 26) > 0;
+  // 小脚
+  ctx.fillStyle = c.outline;
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(x + s * R * 0.45, y + R * 0.92, R * 0.2, R * 0.1, 0, 0, Math.PI * 2); ctx.fill(); }
+  ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2);
+  ctx.fillStyle = red ? '#ff6a4a' : c.body; ctx.fill();
+  ctx.lineWidth = ow * 1.2; ctx.strokeStyle = c.outline; ctx.stroke();
+  ctx.globalAlpha = (ctx.globalAlpha) * 0.4;
+  ctx.beginPath(); ctx.arc(x - R * 0.3, y - R * 0.3, R * 0.45, 0, Math.PI * 2); ctx.fillStyle = c.bodyLight; ctx.fill();
+  ctx.globalAlpha = o.alpha != null ? o.alpha : 1;
+  // 眼 + 大嘴
+  _eyes(ctx, x - R * 0.28, y - R * 0.12, R * 0.1, '#1a1a0a', 1, 0);
+  _eyes(ctx, x + R * 0.28, y - R * 0.12, R * 0.1, '#1a1a0a', 1, 0);
+  ctx.strokeStyle = '#1a1a0a'; ctx.lineWidth = ow;
+  ctx.beginPath(); ctx.arc(x, y + R * 0.18, R * 0.4, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+}
+
 // 颜色预设（主角=浅蓝骑士；敌人按种类配色）
 const SKINS = {
   player: { body: '#4f93d6', bodyLight: '#8fd0ff', outline: '#0c2438', skin: '#cfe8ff', hair: '#24527a', accent: '#ffe08a', eye: '#173049', weapon: '#ffe08a', limb: '#356aa0' },
@@ -261,7 +349,10 @@ const SKINS = {
   elite: { body: '#b5471f', bodyLight: '#ff8a3d', outline: '#250a05', skin: '#c4561f', hair: null, accent: null, eye: '#ffe08a', limb: '#7a2e12' },
   elite_caster: { body: '#5a3aa0', bodyLight: '#9b7cff', outline: '#0c0622', skin: '#5a3aa0', hair: null, accent: null, eye: '#cbb3ff', limb: '#3a2470' },
   boss: { body: '#7a0e1a', bodyLight: '#e8453a', outline: '#180306', skin: '#8a1320', hair: null, accent: null, eye: '#ffd76a', limb: '#4a060e' },
-  boss_archer: { body: '#1f5a2a', bodyLight: '#56c46a', outline: '#06160a', skin: '#1f5a2a', hair: null, accent: null, eye: '#ffd76a', limb: '#0f3a18' }
+  boss_archer: { body: '#1f5a2a', bodyLight: '#56c46a', outline: '#06160a', skin: '#1f5a2a', hair: null, accent: null, eye: '#ffd76a', limb: '#0f3a18' },
+  dog: { body: '#8a5a2a', bodyLight: '#c08a4a', outline: '#1a0e04', skin: '#8a5a2a', hair: null, accent: null, eye: '#ffd76a', limb: '#5a3a18' },
+  spider: { body: '#2a2438', bodyLight: '#4a4060', outline: '#080610', skin: '#2a2438', hair: null, accent: null, eye: '#ff5e5e', limb: '#16121f' },
+  bloat: { body: '#5a7a2a', bodyLight: '#8fbf3a', outline: '#101a06', skin: '#5a7a2a', hair: null, accent: null, eye: '#1a1a0a', limb: '#3a5018' }
 };
 
 module.exports = { drawCharacter, SKINS };
