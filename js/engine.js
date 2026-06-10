@@ -9,6 +9,7 @@ const EffectsManager = require('./effects.js');
 const ProjectileManager = require('./projectile.js');
 const { BoonManager, GODS } = require('./boons.js');
 const { WEAPONS, WEAPON_LIST } = require('./weapons.js');
+const { MetaProgress, UPGRADES } = require('./meta.js');
 const { clamp, len, dist } = require('./utils.js');
 
 function rnd(a, b) { return a + Math.random() * (b - a); }
@@ -53,10 +54,18 @@ class Game {
     this.enemies = [];
     this.shake = 0;
     this.flashT = 0;
-    this.state = 'weaponselect'; // weaponselect | playing | upgrade | boon | dead
-    this.deathPromptT = 0;
+    // 永久成长（持久化）
+    this.meta = MetaProgress.load();
+    this.runResult = null;
+    this.settlementT = 0;
+    this.metaAtk = 0;
+    this.revivesLeft = 0;
+    this.state = 'hall';   // hall | weaponselect | playing | upgrade | boon | settlement
 
-    this._initRun();
+    this._buildArena();
+    this.hallLayout = this._layoutHall();
+    this.player.reset(this.arena.centerX(), this.arena.centerY());
+    this.camera.snapTo(this.player, this.arena);
 
     this.running = false;
     this.rafId = null;
@@ -69,33 +78,44 @@ class Game {
     this._fpsTimer = 0;
   }
 
-  // 新征程：建竞技场、复位玩家/祝福，进入武器选择（不立即刷怪）
-  _initRun() {
+  // 建竞技场几何（仅一次）
+  _buildArena() {
     this.arena = new Room(0, 0, 'arena');
     this.arena.x = 0; this.arena.y = 0;
     this.arena.width = Config.arena.width;
     this.arena.height = Config.arena.height;
     this.arena.wallThickness = Config.arena.wallThickness;
     this.arena.doors = { N: false, E: false, S: false, W: false };
+  }
 
+  // 回到冥府殿堂（hub）
+  _goHall() {
+    this.enemies.length = 0;
+    this.effects.clear();
+    this.projectiles.clear();
+    this.player.reset(this.arena.centerX(), this.arena.centerY());
+    this.camera.snapTo(this.player, this.arena);
+    this.shake = 0;
+    this.flashT = 0;
+    this.input.resetAll();
+    this.state = 'hall';
+  }
+
+  // 从殿堂出发：复位本局状态，进入武器选择
+  _depart() {
     this.enemies.length = 0;
     this.effects.clear();
     this.projectiles.clear();
     this.boons.reset();
     this.boonChoices = null;
     this.pendingBoons = 0;
+    this.upgradePopup = null;
     this.shake = 0;
     this.flashT = 0;
-
     this.player.reset(this.arena.centerX(), this.arena.centerY());
     this.camera.snapTo(this.player, this.arena);
-
-    this.kills = 0;
-    this.elapsed = 0;
-    this.bossAlive = false;
-    this.bossWarnT = 0;
-
     this.weaponChoices = this._layoutWeaponCards();
+    this.input.resetAll();
     this.state = 'weaponselect';
   }
 
@@ -107,6 +127,14 @@ class Game {
 
   _beginArena() {
     const sp = Config.spawn;
+    // 应用永久升级
+    this.metaAtk = this.meta.atkBonus();
+    this.revivesLeft = this.meta.revives();
+    this.player.maxHp = Config.player.maxHp + this.meta.hpBonus();
+    this.player.maxStamina = Config.player.maxStamina + this.meta.stamBonus();
+    this.player.hp = this.player.maxHp;
+    this.player.stamina = this.player.maxStamina;
+
     this.normalTimer = rnd(sp.normalIntervalMin, sp.normalIntervalMax);
     this.eliteTimer = rnd(sp.eliteIntervalMin, sp.eliteIntervalMax);
     this.bossTimer = rnd(sp.bossIntervalMin, sp.bossIntervalMax);
@@ -114,10 +142,45 @@ class Game {
     this.bossWarnT = 0;
     this.kills = 0;
     this.elapsed = 0;
+    this.runBossKills = 0;
     this.enemies.length = 0;
     for (let i = 0; i < sp.initialNormals; i++) this._spawnEnemy('melee');
     this.input.resetAll();
     this.state = 'playing';
+  }
+
+  // 复活（消耗永久升级提供的复活次数）
+  _revive() {
+    this.revivesLeft--;
+    this.player.dead = false;
+    this.player.hp = Math.max(1, Math.ceil(this.player.maxHp * 0.5));
+    this.player.invuln = 2.4;
+    this.player.stagger = 0;
+    this.player.vx = this.player.vy = 0;
+    this.effects.spawn('shock', { x: this.player.x, y: this.player.y, maxR: 380, dur: 0.6, color: Config.Palette.olympusGoldLight });
+    this.flashT = 0.22;
+    this.addShake(0.6);
+    // 击退附近敌人腾出空间
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i];
+      if (!e.isAlive()) continue;
+      const dx = e.x - this.player.x, dy = e.y - this.player.y;
+      const d = len(dx, dy);
+      if (d < 380) { const l = d || 1; e.vx = dx / l * 360; e.vy = dy / l * 360; }
+    }
+  }
+
+  // 结束本局：结算黑暗精华并即时存档
+  _endRun() {
+    const earned = this.kills + this.runBossKills * 20 + Math.floor(this.elapsed / 5);
+    const newBest = this.meta.recordRun(this.kills, this.elapsed);
+    this.meta.addEssence(earned);
+    this.meta.save();
+    this.runResult = { kills: this.kills, time: this.elapsed, bosses: this.runBossKills, essence: earned, newBest };
+    this.settlementT = 0;
+    this.input.resetAll();
+    this.addShake(0.6);
+    this.state = 'settlement';
   }
 
   _raf(cb) {
@@ -178,6 +241,13 @@ class Game {
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * Config.camera.shakeDecay);
     if (this.flashT > 0) this.flashT -= dt;
 
+    if (this.state === 'hall') {
+      const tap = this.input.consumeTap();
+      if (tap) this._handleHallTap(tap);
+      this.effects.update(dt);
+      return;
+    }
+
     if (this.state === 'weaponselect') {
       const tap = this.input.consumeTap();
       if (tap) {
@@ -189,11 +259,10 @@ class Game {
       return;
     }
 
-    if (this.state === 'dead') {
-      this.deathPromptT += dt;
+    if (this.state === 'settlement') {
+      this.settlementT += dt;
       this.effects.update(dt);
-      this.projectiles.update(dt);
-      if (this.deathPromptT > 0.8 && this.input.consumeAnyTap()) this._restart();
+      if (this.settlementT > 0.8 && this.input.consumeAnyTap()) this._goHall();
       return;
     }
 
@@ -263,10 +332,8 @@ class Game {
     this._updateSpawns(dt);
 
     if (this.player.dead) {
-      this.state = 'dead';
-      this.deathPromptT = 0;
-      this.input.consumeAnyTap();
-      this.addShake(0.6);
+      if (this.revivesLeft > 0) this._revive();
+      else { this._endRun(); return; }
     }
 
     this.effects.update(dt);
@@ -386,7 +453,7 @@ class Game {
   // 统一伤害入口：套用祝福加成 + 特效 + 能量 + 连锁
   _damageEnemy(en, base, fromX, fromY, knockback, hitstun, hitColor, opts) {
     const m = this.boons.mods;
-    let dmg = base + m.bonusAttackDamage;
+    let dmg = base + m.bonusAttackDamage + (this.metaAtk || 0);
     let kb = knockback;
     if (m.poseidon.active) { dmg += m.poseidon.impactDamage; kb *= m.poseidon.knockbackMul; }
     en.takeDamage(dmg, fromX, fromY, kb, hitstun);
@@ -582,6 +649,7 @@ class Game {
       if (e.kind === 'elite' || e.isBoss()) this.pendingBoons++;
       if (e.isBoss()) {
         this.bossAlive = false;
+        this.runBossKills++;
         this.player.hp = Math.min(this.player.maxHp, this.player.hp + 40);
         this.player.bossUpgrade();   // 骑士晋级 + 武器强化
         this._queueUpgradePopup();
@@ -620,7 +688,7 @@ class Game {
 
   // ---- 祝福 ----
   _openBoonSelection() {
-    const choices = this.boons.getChoices(3);
+    const choices = this.boons.getChoices(3 + this.meta.boonExtra());
     if (choices.length === 0) { this.pendingBoons = 0; return; }
     this.boonChoices = this._layoutBoonCards(choices);
     this.state = 'boon';
@@ -644,8 +712,8 @@ class Game {
     const prevMaxHp = this.player.maxHp;
     this.boons.add(id);
     const m = this.boons.mods;
-    this.player.maxHp = Config.player.maxHp + m.bonusMaxHp;
-    this.player.maxStamina = Config.player.maxStamina + m.bonusMaxStamina;
+    this.player.maxHp = Config.player.maxHp + this.meta.hpBonus() + m.bonusMaxHp;
+    this.player.maxStamina = Config.player.maxStamina + this.meta.stamBonus() + m.bonusMaxStamina;
     const heal = this.player.maxHp - prevMaxHp;
     if (heal > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
     this.effects.spawn('death', { x: this.player.x, y: this.player.y, dur: 0.5, color: Config.Palette.olympusGoldLight });
@@ -675,7 +743,32 @@ class Game {
 
   _pointInRect(p, r) { return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h; }
 
-  _restart() { this._initRun(); }
+  // ---- 冥府殿堂（hub）----
+  _layoutHall() {
+    const cw = this.cssW, ch = this.cssH;
+    const rowW = Math.min(cw - 40, 360);
+    const rowH = 52, gap = 10;
+    const x = (cw - rowW) / 2;
+    const startY = 220;
+    const rows = UPGRADES.map((u, i) => ({
+      id: u.id,
+      rect: { x, y: startY + i * (rowH + gap), w: rowW, h: rowH }
+    }));
+    const depart = { x: (cw - 200) / 2, y: ch - 96, w: 200, h: 60 };
+    return { rows, depart };
+  }
+
+  _handleHallTap(tap) {
+    if (this._pointInRect(tap, this.hallLayout.depart)) { this._depart(); return; }
+    for (const row of this.hallLayout.rows) {
+      if (this._pointInRect(tap, row.rect)) {
+        if (this.meta.buy(row.id)) {
+          this.effects.spawn('shock', { x: this.player.x, y: this.player.y, maxR: 180, dur: 0.4, color: Config.Palette.olympusGoldLight });
+        }
+        break;
+      }
+    }
+  }
 
   // ---- 武器选择卡片 ----
   _layoutWeaponCards() {
@@ -723,7 +816,7 @@ class Game {
   }
 
   _renderUI(ctx) {
-    if (this.state === 'playing' || this.state === 'boon' || this.state === 'dead' || this.state === 'upgrade') {
+    if (this.state === 'playing' || this.state === 'boon' || this.state === 'upgrade') {
       this._drawHud(ctx);
       this._drawBoonBar(ctx);
       this._drawBossBar(ctx);
@@ -734,10 +827,11 @@ class Game {
       if (this.bossWarnT > 0) this._drawBossWarn(ctx);
     }
     if (this.flashT > 0) this._drawFlash(ctx);
+    if (this.state === 'hall') this._drawHall(ctx);
     if (this.state === 'weaponselect') this._drawWeaponSelect(ctx);
     if (this.state === 'upgrade') this._drawUpgradeOverlay(ctx);
     if (this.state === 'boon') this._drawBoonOverlay(ctx);
-    if (this.state === 'dead') this._drawDeathOverlay(ctx);
+    if (this.state === 'settlement') this._drawSettlement(ctx);
   }
 
   _drawUpgradeOverlay(ctx) {
@@ -1084,24 +1178,145 @@ class Game {
     for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], tx, r.y + 62 + i * 18);
   }
 
-  _drawDeathOverlay(ctx) {
+  // 死亡结算：统计黑暗精华
+  _drawSettlement(ctx) {
     const P = Config.Palette;
     const cw = this.cssW, ch = this.cssH;
-    ctx.fillStyle = 'rgba(10,4,18,0.72)';
+    const rr = this.runResult || { kills: 0, time: 0, bosses: 0, essence: 0, newBest: false };
+    ctx.fillStyle = 'rgba(8,4,16,0.85)';
     ctx.fillRect(0, 0, cw, ch);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+
     ctx.fillStyle = P.bloodRedLight;
-    ctx.font = 'bold 46px serif';
-    ctx.fillText('你 已 陨 落', cw / 2, ch / 2 - 50);
-    ctx.fillStyle = P.textLight;
-    ctx.font = '18px sans-serif';
-    ctx.fillText('存活 ' + fmtTime(this.elapsed) + '   击杀 ' + this.kills, cw / 2, ch / 2 - 6);
-    if (this.deathPromptT > 0.8 && Math.floor(this.deathPromptT * 2) % 2 === 0) {
-      ctx.fillStyle = P.olympusGoldLight;
-      ctx.font = '20px serif';
-      ctx.fillText('轻触重新开始（重选武器）', cw / 2, ch / 2 + 50);
+    ctx.font = 'bold 42px serif';
+    ctx.fillText('你 已 陨 落', cw / 2, ch * 0.26);
+
+    const lines = [
+      ['存活时间', fmtTime(rr.time)],
+      ['击杀数', '' + rr.kills],
+      ['击败 Boss', '' + rr.bosses]
+    ];
+    let y = ch * 0.4;
+    ctx.font = '17px sans-serif';
+    for (const [k, v] of lines) {
+      ctx.textAlign = 'right'; ctx.fillStyle = 'rgba(243,233,210,0.7)';
+      ctx.fillText(k, cw / 2 - 10, y);
+      ctx.textAlign = 'left'; ctx.fillStyle = P.textLight;
+      ctx.fillText(v, cw / 2 + 10, y);
+      y += 30;
     }
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(243,233,210,0.7)';
+    ctx.font = '15px sans-serif';
+    ctx.fillText('获得黑暗精华', cw / 2, y + 16);
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = 'bold 40px serif';
+    ctx.fillText('✦ ' + rr.essence, cw / 2, y + 54);
+
+    if (rr.newBest) {
+      ctx.fillStyle = P.lavaGlow;
+      ctx.font = 'bold 16px serif';
+      ctx.fillText('★ 新纪录！', cw / 2, y + 90);
+    }
+
+    if (this.settlementT > 0.8 && Math.floor(this.settlementT * 2) % 2 === 0) {
+      ctx.fillStyle = P.olympusGoldLight;
+      ctx.font = '18px serif';
+      ctx.fillText('轻触返回冥府殿堂', cw / 2, ch - 70);
+    }
+  }
+
+  // 冥府殿堂：用精华购买永久升级，出发再次冒险
+  _drawHall(ctx) {
+    const P = Config.Palette;
+    const cw = this.cssW, ch = this.cssH;
+
+    // 殿堂背景（暗紫渐变 + 石柱 + 火盆）
+    const bg = ctx.createLinearGradient(0, 0, 0, ch);
+    bg.addColorStop(0, '#1a0f2a');
+    bg.addColorStop(1, '#0c0612');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    for (let i = 0; i < 4; i++) {
+      const px = 30 + i * (cw - 60) / 3;
+      ctx.fillRect(px - 12, 60, 24, ch - 200);
+    }
+
+    // 殿堂中的角色立绘
+    this.player.x = this.arena.centerX();
+    this.player.y = this.arena.centerY();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = 'bold 26px serif';
+    ctx.fillText('冥 府 殿 堂', cw / 2, 34);
+    ctx.fillStyle = 'rgba(243,233,210,0.65)';
+    ctx.font = '13px sans-serif';
+    ctx.fillText('「又回来了，王子。带着精华去变强吧。」 —— 卡戎', cw / 2, 70);
+
+    // 精华与纪录
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = 'bold 22px serif';
+    ctx.fillText('✦ 黑暗精华 ' + this.meta.essence, cw / 2, 104);
+    ctx.fillStyle = 'rgba(243,233,210,0.55)';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('最佳：击杀 ' + this.meta.best.kills + ' · 存活 ' + fmtTime(this.meta.best.time), cw / 2, 134);
+    ctx.fillStyle = 'rgba(243,233,210,0.4)';
+    ctx.fillText('— 永久升级 —', cw / 2, 168);
+
+    // 升级行
+    for (const row of this.hallLayout.rows) {
+      const u = this.meta.def(row.id);
+      const lv = this.meta.level(row.id);
+      const r = row.rect;
+      const maxed = this.meta.isMax(row.id);
+      const afford = this.meta.canBuy(row.id);
+
+      ctx.fillStyle = 'rgba(24,14,38,0.92)';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = afford ? P.olympusGold : 'rgba(245,197,66,0.35)';
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = P.olympusGoldLight;
+      ctx.font = 'bold 15px serif';
+      ctx.fillText(u.name + '  Lv.' + lv + '/' + u.max, r.x + 12, r.y + 9);
+      ctx.fillStyle = 'rgba(243,233,210,0.7)';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(u.effect(lv + (maxed ? 0 : 1)), r.x + 12, r.y + 30);
+
+      // 价格 / 状态
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      if (maxed) {
+        ctx.fillStyle = P.lavaGlow;
+        ctx.font = 'bold 14px serif';
+        ctx.fillText('已满', r.x + r.w - 14, r.y + r.h / 2);
+      } else {
+        ctx.fillStyle = afford ? P.olympusGoldLight : 'rgba(243,233,210,0.4)';
+        ctx.font = 'bold 16px serif';
+        ctx.fillText('✦ ' + this.meta.costNext(row.id), r.x + r.w - 14, r.y + r.h / 2);
+      }
+    }
+
+    // 出发按钮
+    const d = this.hallLayout.depart;
+    ctx.fillStyle = 'rgba(40,24,60,0.9)';
+    ctx.fillRect(d.x, d.y, d.w, d.h);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = P.olympusGold;
+    ctx.strokeRect(d.x, d.y, d.w, d.h);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = 'bold 24px serif';
+    ctx.fillText('出 发', d.x + d.w / 2, d.y + d.h / 2 + 1);
   }
 }
 
