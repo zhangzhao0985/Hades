@@ -85,14 +85,14 @@ class Room {
     return { x: this.x, y: cy - dw / 2, w: wt, h: dw }; // W
   }
 
-  draw(ctx) {
-    this._drawFloor(ctx);
+  draw(ctx, view) {
+    this._drawFloor(ctx, view);
     this._drawWalls(ctx);
     this._drawDoors(ctx);
     this._drawTypeMark(ctx);
   }
 
-  _drawFloor(ctx) {
+  _drawFloor(ctx, view) {
     const P = Config.Palette;
     const { x, y, width: w, height: h } = this;
     const tint = FLOOR_TINT[this.type] || FLOOR_TINT.normal;
@@ -103,14 +103,24 @@ class Room {
     ctx.fillStyle = grad;
     ctx.fillRect(x, y, w, h);
 
-    // 网格纹理
+    // 网格纹理：仅绘制可视范围内的线（大竞技场性能优化）
+    const step = 100;
+    let gx0 = x + step, gx1 = x + w, gy0 = y + step, gy1 = y + h;
+    let lineTop = y, lineBot = y + h, lineLeft = x, lineRight = x + w;
+    if (view) {
+      gx0 = Math.max(gx0, Math.floor((view.x0 - x) / step) * step + x);
+      gx1 = Math.min(gx1, view.x1);
+      gy0 = Math.max(gy0, Math.floor((view.y0 - y) / step) * step + y);
+      gy1 = Math.min(gy1, view.y1);
+      lineTop = Math.max(y, view.y0); lineBot = Math.min(y + h, view.y1);
+      lineLeft = Math.max(x, view.x0); lineRight = Math.min(x + w, view.x1);
+    }
     ctx.strokeStyle = P.floorLine;
     ctx.lineWidth = 1;
     ctx.globalAlpha = 0.45;
-    const step = 100;
     ctx.beginPath();
-    for (let gx = x + step; gx < x + w; gx += step) { ctx.moveTo(gx, y); ctx.lineTo(gx, y + h); }
-    for (let gy = y + step; gy < y + h; gy += step) { ctx.moveTo(x, gy); ctx.lineTo(x + w, gy); }
+    for (let gx = gx0; gx < gx1; gx += step) { ctx.moveTo(gx, lineTop); ctx.lineTo(gx, lineBot); }
+    for (let gy = gy0; gy < gy1; gy += step) { ctx.moveTo(lineLeft, gy); ctx.lineTo(lineRight, gy); }
     ctx.stroke();
     ctx.globalAlpha = 1;
   }

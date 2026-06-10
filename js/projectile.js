@@ -81,8 +81,13 @@ class ProjectileManager {
     for (let i = 0; i < this.pool.length; i++) if (this.pool[i].active) this.pool[i].update(dt);
   }
 
-  draw(ctx) {
-    for (let i = 0; i < this.pool.length; i++) if (this.pool[i].active) this.pool[i].draw(ctx);
+  draw(ctx, view) {
+    for (let i = 0; i < this.pool.length; i++) {
+      const p = this.pool[i];
+      if (!p.active) continue;
+      if (view && (p.x < view.x0 || p.x > view.x1 || p.y < view.y0 || p.y > view.y1)) continue;
+      p.draw(ctx);
+    }
   }
 
   clear() {

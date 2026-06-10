@@ -223,9 +223,12 @@ class EffectsManager {
     }
   }
 
-  draw(ctx) {
+  draw(ctx, view) {
     for (let i = 0; i < this.pool.length; i++) {
-      if (this.pool[i].active) this.pool[i].draw(ctx);
+      const e = this.pool[i];
+      if (!e.active) continue;
+      if (view && (e.x < view.x0 || e.x > view.x1 || e.y < view.y0 || e.y > view.y1)) continue;
+      e.draw(ctx);
     }
   }
 

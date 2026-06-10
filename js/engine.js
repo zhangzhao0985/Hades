@@ -10,7 +10,17 @@ const ProjectileManager = require('./projectile.js');
 const { BoonManager, GODS } = require('./boons.js');
 const { WEAPONS, WEAPON_LIST } = require('./weapons.js');
 const { MetaProgress, UPGRADES } = require('./meta.js');
+const AudioManager = require('./audio.js');
+const { drawCharacter } = require('./sprites.js');
 const { clamp, len, dist } = require('./utils.js');
+
+// NPC（卡戎）对话台词
+const CHARON_LINES = [
+  ['卡戎', 'Hrrmmm…… 又见面了，冥王之子。'],
+  ['卡戎', '黑暗精华能换来力量，别在殿堂里白白浪费。'],
+  ['卡戎', '诸神的馈赠各有脾性——善用它们的组合。'],
+  ['卡戎', '冥河的彼岸仍有人等你。去吧，别回头。']
+];
 
 function rnd(a, b) { return a + Math.random() * (b - a); }
 function rndInt(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
@@ -60,6 +70,11 @@ class Game {
     this.settlementT = 0;
     this.metaAtk = 0;
     this.revivesLeft = 0;
+    // 第七步：音效接口 / 对话 / 旁白
+    this.audio = new AudioManager();
+    this.dialogue = null;       // { speaker, lines, index }
+    this.charonTurn = 0;
+    this.narration = null;      // { text, t, dur }
     this.state = 'hall';   // hall | weaponselect | playing | upgrade | boon | settlement
 
     this._buildArena();
@@ -120,6 +135,7 @@ class Game {
   }
 
   _chooseWeapon(id) {
+    this.audio.play('select');
     this.player.setWeapon(WEAPONS[id]);
     this.player.energy = 0;
     this._beginArena();
@@ -146,11 +162,14 @@ class Game {
     this.enemies.length = 0;
     for (let i = 0; i < sp.initialNormals; i++) this._spawnEnemy('melee');
     this.input.resetAll();
+    this.narration = null;
+    this._narrate('冥界的喧嚣再度袭来……', 3.2);
     this.state = 'playing';
   }
 
   // 复活（消耗永久升级提供的复活次数）
   _revive() {
+    this.audio.play('revive');
     this.revivesLeft--;
     this.player.dead = false;
     this.player.hp = Math.max(1, Math.ceil(this.player.maxHp * 0.5));
@@ -179,6 +198,7 @@ class Game {
     this.runResult = { kills: this.kills, time: this.elapsed, bosses: this.runBossKills, essence: earned, newBest };
     this.settlementT = 0;
     this.input.resetAll();
+    this.audio.play('die');
     this.addShake(0.6);
     this.state = 'settlement';
   }
@@ -243,7 +263,10 @@ class Game {
 
     if (this.state === 'hall') {
       const tap = this.input.consumeTap();
-      if (tap) this._handleHallTap(tap);
+      if (tap) {
+        if (this.dialogue) this._advanceDialogue();
+        else this._handleHallTap(tap);
+      }
       this.effects.update(dt);
       return;
     }
@@ -292,18 +315,20 @@ class Game {
     // playing
     this.elapsed += dt;
     if (this.bossWarnT > 0) this.bossWarnT -= dt;
+    if (this.narration) { this.narration.t -= dt; if (this.narration.t <= 0) this.narration = null; }
 
     if (this.input.consumePress('dash')) {
       if (this.player.tryDash(this.input)) {
+        this.audio.play('dash');
         this.effects.spawn('dashtrail', { x: this.player.x, y: this.player.y, reach: this.player.radius, dur: 0.18 });
         this.addShake(0.1);
       }
     }
     if (this.input.consumePress('special')) {
-      if (this.player.trySpecial(this.input)) this._executeSpecial();
+      if (this.player.trySpecial(this.input)) { this.audio.play('special'); this._executeSpecial(); }
     }
     if (this.input.consumePress('ultimate')) {
-      if (this.player.energyFull()) this._executeUltimate();
+      if (this.player.energyFull()) { this.audio.play('ultimate'); this._executeUltimate(); }
     }
     // 普攻：按住 ⚔ 朝摇杆方向手动攻击；否则自动瞄准最近敌人
     let didAttack = false;
@@ -462,6 +487,7 @@ class Game {
     this.effects.spawn('hit', { x: en.x, y: en.y, angle: Math.atan2(en.y - fromY, en.x - fromX), dur: 0.2, color: hitColor || Config.Palette.spark });
     this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: Math.round(dmg), vy: -70, dur: 0.6, color: Config.Palette.olympusGoldLight });
     this.player.gainEnergy(Config.player.energyPerHit);
+    this.audio.play('hit');
     if (m.zeus.active && (!opts || opts.chain !== false)) this._chainLightning(en, m.zeus);
   }
 
@@ -495,6 +521,8 @@ class Game {
     if (kind === 'boss') {
       this.bossAlive = true;
       this.bossWarnT = 2.5;
+      this.audio.play('bossSpawn');
+      this._narrate('冥府守卫降临——证明你的价值！', 3);
       this.effects.spawn('death', { x: p.x, y: p.y, dur: 0.6, color: Config.Palette.bloodRedLight });
       this.addShake(0.5);
     } else {
@@ -625,6 +653,7 @@ class Game {
 
       if (en.canDamagePlayer()) {
         if (this.player.takeDamage(en.contactDamage(), en.x, en.y)) {
+          this.audio.play('hurt');
           this.player.gainEnergy(Config.player.energyOnHurt);
           en.contactCd = en.stats.contactCooldown;
           const l = d || 1;
@@ -650,6 +679,7 @@ class Game {
       if (e.isBoss()) {
         this.bossAlive = false;
         this.runBossKills++;
+        this.audio.play('bossDown');
         this.player.hp = Math.min(this.player.maxHp, this.player.hp + 40);
         this.player.bossUpgrade();   // 骑士晋级 + 武器强化
         this._queueUpgradePopup();
@@ -716,6 +746,7 @@ class Game {
     this.player.maxStamina = Config.player.maxStamina + this.meta.stamBonus() + m.bonusMaxStamina;
     const heal = this.player.maxHp - prevMaxHp;
     if (heal > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
+    this.audio.play('boon');
     this.effects.spawn('death', { x: this.player.x, y: this.player.y, dur: 0.5, color: Config.Palette.olympusGoldLight });
     this.boonChoices = null;
     this.pendingBoons = Math.max(0, this.pendingBoons - 1);
@@ -755,19 +786,36 @@ class Game {
       rect: { x, y: startY + i * (rowH + gap), w: rowW, h: rowH }
     }));
     const depart = { x: (cw - 200) / 2, y: ch - 96, w: 200, h: 60 };
-    return { rows, depart };
+    const npc = { x: cw - 98, y: 84, w: 84, h: 104 };
+    return { rows, depart, npc };
   }
 
   _handleHallTap(tap) {
-    if (this._pointInRect(tap, this.hallLayout.depart)) { this._depart(); return; }
+    if (this._pointInRect(tap, this.hallLayout.npc)) { this._openDialogue(); return; }
+    if (this._pointInRect(tap, this.hallLayout.depart)) { this.audio.play('depart'); this._depart(); return; }
     for (const row of this.hallLayout.rows) {
       if (this._pointInRect(tap, row.rect)) {
         if (this.meta.buy(row.id)) {
+          this.audio.play('buy');
           this.effects.spawn('shock', { x: this.player.x, y: this.player.y, maxR: 180, dur: 0.4, color: Config.Palette.olympusGoldLight });
         }
         break;
       }
     }
+  }
+
+  _openDialogue() {
+    this.dialogue = { lines: CHARON_LINES, index: 0 };
+    this.audio.play('select');
+  }
+  _advanceDialogue() {
+    if (!this.dialogue) return;
+    this.dialogue.index++;
+    if (this.dialogue.index >= this.dialogue.lines.length) this.dialogue = null;
+  }
+
+  _narrate(text, dur) {
+    this.narration = { text, t: dur || 3.5, dur: dur || 3.5 };
   }
 
   // ---- 武器选择卡片 ----
@@ -805,11 +853,22 @@ class Game {
       this.canvas.width / 2 - (cam.x + ox) * rs,
       this.canvas.height / 2 - (cam.y + oy) * rs);
 
-    this.arena.draw(ctx);
-    for (let i = 0; i < this.enemies.length; i++) this.enemies[i].draw(ctx);
-    this.projectiles.draw(ctx);
+    // 可视范围裁剪（大竞技场性能优化）
+    const mg = 90;
+    const view = {
+      x0: cam.x - this.viewWorldW / 2 - mg, x1: cam.x + this.viewWorldW / 2 + mg,
+      y0: cam.y - this.viewWorldH / 2 - mg, y1: cam.y + this.viewWorldH / 2 + mg
+    };
+
+    this.arena.draw(ctx, view);
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i];
+      if (e.x < view.x0 || e.x > view.x1 || e.y < view.y0 || e.y > view.y1) continue;
+      e.draw(ctx);
+    }
+    this.projectiles.draw(ctx, view);
     this.player.draw(ctx);
-    this.effects.draw(ctx);
+    this.effects.draw(ctx, view);
 
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this._renderUI(ctx);
@@ -822,8 +881,10 @@ class Game {
       this._drawBossBar(ctx);
     }
     if (this.state === 'playing') {
+      this._drawLowHpVignette(ctx);
       this._drawJoystick(ctx);
       this._drawActionButtons(ctx);
+      if (this.narration) this._drawNarration(ctx);
       if (this.bossWarnT > 0) this._drawBossWarn(ctx);
     }
     if (this.flashT > 0) this._drawFlash(ctx);
@@ -878,6 +939,37 @@ class Game {
     ctx.fillStyle = '#fff7e0';
     ctx.fillRect(0, 0, this.cssW, this.cssH);
     ctx.globalAlpha = 1;
+  }
+
+  // 低血量红色暗角（脉动）
+  _drawLowHpVignette(ctx) {
+    const frac = this.player.hp / this.player.maxHp;
+    if (frac >= 0.3) return;
+    const cw = this.cssW, ch = this.cssH;
+    const a = ((0.3 - frac) / 0.3) * (0.32 + 0.14 * Math.sin(this.elapsed * 6));
+    const g = ctx.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * 0.32, cw / 2, ch / 2, Math.max(cw, ch) * 0.62);
+    g.addColorStop(0, 'rgba(150,12,12,0)');
+    g.addColorStop(1, 'rgba(150,12,12,' + a.toFixed(3) + ')');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, cw, ch);
+  }
+
+  // 战斗旁白（顶部淡入淡出）
+  _drawNarration(ctx) {
+    const n = this.narration;
+    const a = clamp(Math.min(n.t, n.dur - n.t) / 0.5, 0, 1); // 头尾各 0.5s 渐变
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'italic 16px serif';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(8,4,16,0.85)';
+    ctx.fillStyle = Config.Palette.olympusGoldLight;
+    const y = this.cssH * 0.2;
+    ctx.strokeText(n.text, this.cssW / 2, y);
+    ctx.fillText(n.text, this.cssW / 2, y);
+    ctx.restore();
   }
 
   _drawJoystick(ctx) {
@@ -942,6 +1034,14 @@ class Game {
         ctx.beginPath();
         ctx.arc(b.x, b.y, b.r - 4, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
         ctx.stroke();
+      } else if (key === 'dash' && pl.dashCd > 0) {
+        const frac = clamp(pl.dashCd / Config.dash.cooldown, 0, 1);
+        ctx.globalAlpha = 0.8;
+        ctx.strokeStyle = 'rgba(143,208,255,0.7)';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r - 4, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+        ctx.stroke();
       }
 
       ctx.globalAlpha = avail ? 1 : 0.5;
@@ -969,20 +1069,32 @@ class Game {
   _drawHud(ctx) {
     const P = Config.Palette;
     const cw = this.cssW;
+
+    // HUD 底板（提升可读性）
+    ctx.fillStyle = 'rgba(8,4,16,0.32)';
+    ctx.fillRect(8, 8, 268, 90);
+
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
     ctx.fillStyle = P.olympusGoldLight;
-    ctx.font = 'bold 22px serif';
-    ctx.fillText('HADES · 冥府竞技场', 20, 16);
+    ctx.font = 'bold 20px serif';
+    ctx.fillText('HADES · 冥府竞技场', 20, 14);
 
     const bx = 20, bw = 240;
-    this._drawBar(ctx, bx, 46, bw, 16, this.player.hp / this.player.maxHp, P.hpFill, P.hpFillLight);
+    this._drawBar(ctx, bx, 44, bw, 16, this.player.hp / this.player.maxHp, P.hpFill, P.hpFillLight);
+    // 每 50 HP 一个刻度
+    ctx.strokeStyle = 'rgba(8,4,16,0.5)';
+    ctx.lineWidth = 1;
+    for (let v = 50; v < this.player.maxHp; v += 50) {
+      const tx = bx + bw * (v / this.player.maxHp);
+      ctx.beginPath(); ctx.moveTo(tx, 44); ctx.lineTo(tx, 44 + 16); ctx.stroke();
+    }
     ctx.fillStyle = P.textLight;
     ctx.font = '11px sans-serif';
     ctx.textBaseline = 'middle';
-    ctx.fillText('HP ' + Math.ceil(this.player.hp) + '/' + this.player.maxHp, bx + 8, 46 + 8);
-    this._drawBar(ctx, bx, 68, bw, 9, this.player.stamina / this.player.maxStamina, P.staminaFill, P.staminaFillLight);
-    this._drawBar(ctx, bx, 83, bw, 9, this.player.energy / this.player.maxEnergy, '#e08a2b', P.olympusGoldLight);
+    ctx.fillText('HP ' + Math.ceil(this.player.hp) + '/' + this.player.maxHp, bx + 8, 44 + 8);
+    this._drawBar(ctx, bx, 66, bw, 9, this.player.stamina / this.player.maxStamina, P.staminaFill, P.staminaFillLight);
+    this._drawBar(ctx, bx, 81, bw, 9, this.player.energy / this.player.maxEnergy, '#e08a2b', P.olympusGoldLight);
 
     // 存活 / 击杀（右上）
     ctx.textAlign = 'right';
@@ -1317,6 +1429,60 @@ class Game {
     ctx.fillStyle = P.olympusGoldLight;
     ctx.font = 'bold 24px serif';
     ctx.fillText('出 发', d.x + d.w / 2, d.y + d.h / 2 + 1);
+
+    // 卡戎 NPC（可点击对话）
+    const npc = this.hallLayout.npc;
+    const ncx = npc.x + npc.w / 2, ncy = npc.y + npc.h * 0.5;
+    drawCharacter(ctx, {
+      x: ncx, y: ncy, r: 30, facing: Math.PI, moving: false, walk: 0,
+      colors: { body: '#241a3a', bodyLight: '#3a2a55', outline: '#080510', skin: '#241a3a', hair: null, accent: null, eye: '#ffd76a', limb: '#160f28' },
+      feature: null, glowEyes: true
+    });
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(243,233,210,0.85)';
+    ctx.font = '12px serif';
+    ctx.fillText('卡戎 ▾', ncx, npc.y + npc.h - 4);
+
+    if (this.dialogue) this._drawDialogue(ctx);
+  }
+
+  _drawDialogue(ctx) {
+    const P = Config.Palette;
+    const cw = this.cssW, ch = this.cssH;
+    const d = this.dialogue;
+    const line = d.lines[d.index];
+    const speaker = line[0], text = line[1];
+
+    const bx = 20, bw = cw - 40, bh = 118, by = ch - 150;
+    ctx.fillStyle = 'rgba(8,4,16,0.94)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = P.olympusGold;
+    ctx.strokeRect(bx, by, bw, bh);
+
+    // 说话人标签
+    ctx.fillStyle = P.olympusGold;
+    ctx.fillRect(bx, by - 26, 96, 26);
+    ctx.fillStyle = '#0c0612';
+    ctx.font = 'bold 15px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(speaker, bx + 48, by - 12);
+
+    // 正文（折行）
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = P.textLight;
+    ctx.font = '15px sans-serif';
+    const lines = this._wrapText(ctx, text, bw - 32);
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], bx + 16, by + 18 + i * 22);
+
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = '12px serif';
+    ctx.fillText('▼ 轻触继续  ' + (d.index + 1) + '/' + d.lines.length, bx + bw - 14, by + bh - 10);
   }
 }
 
