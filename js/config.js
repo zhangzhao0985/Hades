@@ -80,6 +80,24 @@ const Config = {
     poolSize: 260
   },
 
+  // 拾取物（回血/精华/能量），磁吸拾取
+  pickup: {
+    poolSize: 160,
+    magnetRange: 140,
+    magnetAccel: 1200,
+    maxSpeed: 620,
+    collectPad: 16,
+    life: 12,
+    popSpeed: 140
+  },
+
+  // 怪物掉落（按等级）
+  drops: {
+    normal: { health: { chance: 0.12, value: 12 }, essence: { chance: 0.28, min: 1, max: 2 }, energy: { chance: 0.12, value: 8 } },
+    elite: { health: { chance: 0.5, value: 22 }, essence: { chance: 1, min: 3, max: 5 }, energy: { chance: 0.6, value: 18 } },
+    boss: { health: { chance: 1, value: 45 }, essence: { chance: 1, min: 16, max: 26 }, energy: { chance: 1, value: 60 } }
+  },
+
   // 普通攻击（扇形判定 + 三段连击）
   attack: {
     damage: 18,

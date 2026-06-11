@@ -12,6 +12,7 @@ const { WEAPONS, WEAPON_LIST } = require('./weapons.js');
 const { MetaProgress, UPGRADES } = require('./meta.js');
 const AudioManager = require('./audio.js');
 const DecorField = require('./decor.js');
+const PickupManager = require('./pickup.js');
 const { drawCharacter } = require('./sprites.js');
 const { clamp, len, dist } = require('./utils.js');
 
@@ -52,6 +53,7 @@ class Game {
     this.input = new InputManager(cssW, cssH);
     this.effects = new EffectsManager(Config.effects.poolSize);
     this.projectiles = new ProjectileManager(Config.projectiles.poolSize);
+    this.pickups = new PickupManager(Config.pickup.poolSize);
     this.player = new Player(0, 0);
     this.camera = new Camera(0, 0);
     this.camera.setViewport(this.viewWorldW, this.viewWorldH);
@@ -166,6 +168,8 @@ class Game {
     this.darts = null;
     this.hazards = [];
     this.decor = new DecorField(this.arena);
+    this.runEssence = 0;
+    this.pickups.clear();
     this.enemies.length = 0;
     this.projectiles.clear();
     for (let i = 0; i < sp.initialNormals; i++) this._spawnEnemy(this._pick(Config.enemy.normalSpawn));
@@ -203,11 +207,11 @@ class Game {
 
   // 结束本局：结算黑暗精华并即时存档
   _endRun() {
-    const earned = this.kills + this.runBossKills * 20 + Math.floor(this.elapsed / 5);
+    const earned = this.kills + this.runBossKills * 20 + Math.floor(this.elapsed / 5) + (this.runEssence || 0);
     const newBest = this.meta.recordRun(this.kills, this.elapsed);
     this.meta.addEssence(earned);
     this.meta.save();
-    this.runResult = { kills: this.kills, time: this.elapsed, bosses: this.runBossKills, essence: earned, newBest };
+    this.runResult = { kills: this.kills, time: this.elapsed, bosses: this.runBossKills, essence: earned, picked: this.runEssence || 0, newBest };
     this.settlementT = 0;
     this.input.resetAll();
     this.audio.play('die');
@@ -368,6 +372,7 @@ class Game {
     this._resolveEnemyContact();
     this._handleKills();
     if (this.decor) this.decor.update(dt, this.player);
+    this.pickups.update(dt, this.player, (type, value) => this._collect(type, value));
 
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       if (this.enemies[i].isGone()) this.enemies.splice(i, 1);
@@ -510,6 +515,7 @@ class Game {
     this.hazards.push({ x: e.x, y: e.y, r: e.radius * 0.5, maxR: d.explodeRadius, speed: 900, band: 40, damage: d.explodeDamage, hitDone: false, color: '#8fbf3a' });
     this.effects.spawn('shock', { x: e.x, y: e.y, maxR: d.explodeRadius, dur: 0.4, color: '#aef07a' });
     this.effects.spawn('death', { x: e.x, y: e.y, dur: 0.35, color: '#8fbf3a' });
+    this.audio.play('explode');
     this.addShake(0.4);
     e.hp = 0; e.state = 'dead'; e.deadTimer = 0.2;
   }
@@ -1037,6 +1043,7 @@ class Game {
       const col = e.isBoss() ? Config.Palette.bloodRedLight : (e.tier === 'elite' ? Config.Palette.lavaGlow : Config.Palette.spark);
       this.effects.spawn('death', { x: e.x, y: e.y, dur: e.isBoss() ? 0.7 : 0.35, color: col });
       this.addShake(e.isBoss() ? 0.7 : (e.tier === 'elite' ? 0.4 : 0.28));
+      this._spawnDrops(e);
       if (e.tier === 'elite' || e.isBoss()) this.pendingBoons++;
       if (e.isBoss()) {
         this.bossAlive = false;
@@ -1049,6 +1056,30 @@ class Game {
       }
     }
     if (this.pendingBoons > 0 && this.state === 'playing') this._openBoonSelection();
+  }
+
+  // 按等级掉落拾取物
+  _spawnDrops(e) {
+    const tbl = Config.drops[e.tier] || Config.drops.normal;
+    if (Math.random() < tbl.health.chance) this.pickups.spawn({ type: 'health', value: tbl.health.value, x: e.x, y: e.y });
+    if (Math.random() < tbl.essence.chance) {
+      const v = tbl.essence.min + Math.floor(Math.random() * (tbl.essence.max - tbl.essence.min + 1));
+      this.pickups.spawn({ type: 'essence', value: v, x: e.x, y: e.y });
+    }
+    if (Math.random() < tbl.energy.chance) this.pickups.spawn({ type: 'energy', value: tbl.energy.value, x: e.x, y: e.y });
+  }
+
+  _collect(type, value) {
+    this.audio.play('pickup');
+    if (type === 'health') {
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + value);
+      this.effects.spawn('dmg', { x: this.player.x, y: this.player.y - this.player.radius - 8, text: '+' + value, vy: -60, dur: 0.6, color: '#ff9ea6' });
+    } else if (type === 'energy') {
+      this.player.gainEnergy(value);
+    } else { // essence
+      this.runEssence += value;
+      this.effects.spawn('dmg', { x: this.player.x, y: this.player.y - this.player.radius - 8, text: '✦' + value, vy: -60, dur: 0.6, color: '#c9a8ff' });
+    }
   }
 
   _separateEnemies() {
@@ -1225,6 +1256,7 @@ class Game {
 
     this.arena.draw(ctx, view);
     if (this.decor) this.decor.draw(ctx, view);
+    this.pickups.draw(ctx, view);
     for (let i = 0; i < this.enemies.length; i++) {
       const e = this.enemies[i];
       if (e.x < view.x0 || e.x > view.x1 || e.y < view.y0 || e.y > view.y1) continue;
@@ -1468,7 +1500,7 @@ class Game {
     ctx.textBaseline = 'top';
     ctx.fillStyle = 'rgba(243,233,210,0.85)';
     ctx.font = '14px sans-serif';
-    ctx.fillText('存活 ' + fmtTime(this.elapsed) + ' · 击杀 ' + this.kills, cw - 16, 18);
+    ctx.fillText('存活 ' + fmtTime(this.elapsed) + ' · 击杀 ' + this.kills + ' · ✦' + (this.runEssence || 0), cw - 16, 18);
     ctx.fillStyle = 'rgba(243,233,210,0.45)';
     ctx.fillText('武器：' + this.player.weapon.name + '  FPS ' + this.fps, cw - 16, 38);
   }
@@ -1674,7 +1706,8 @@ class Game {
     const lines = [
       ['存活时间', fmtTime(rr.time)],
       ['击杀数', '' + rr.kills],
-      ['击败 Boss', '' + rr.bosses]
+      ['击败 Boss', '' + rr.bosses],
+      ['拾取精华', '✦' + (rr.picked || 0)]
     ];
     let y = ch * 0.4;
     ctx.font = '17px sans-serif';

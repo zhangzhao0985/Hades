@@ -14,7 +14,8 @@ class AudioManager {
   // 预留音效键；要启用就在此填路径，或外部调用 register()
   _registerDefaults() {
     const keys = ['attack', 'hit', 'dash', 'special', 'ultimate', 'boon', 'buy',
-      'bossSpawn', 'bossDown', 'hurt', 'revive', 'depart', 'select', 'die'];
+      'bossSpawn', 'bossDown', 'hurt', 'revive', 'depart', 'select', 'die',
+      'pickup', 'explode', 'web'];
     for (const k of keys) this.srcs[k] = null;
     // 示例（放入文件后取消注释即可）：
     // this.register('hit', 'audio/hit.mp3');
