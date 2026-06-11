@@ -82,6 +82,8 @@ class Game {
 
     this._buildArena();
     this.hallLayout = this._layoutHall();
+    this.uiTime = 0;
+    this.codexBtn = { x: this.cssW - 54, y: 50, w: 40, h: 40 };
     this.player.reset(this.arena.centerX(), this.arena.centerY());
     this.camera.snapTo(this.player, this.arena);
 
@@ -274,8 +276,15 @@ class Game {
 
   // ============ 逻辑更新 ============
   _update(dt) {
+    this.uiTime += dt;
     if (this.shake > 0) this.shake = Math.max(0, this.shake - dt * Config.camera.shakeDecay);
     if (this.flashT > 0) this.flashT -= dt;
+
+    if (this.state === 'codex') {
+      this.effects.update(dt);
+      if (this.input.consumeTap()) this.state = 'playing';
+      return;
+    }
 
     if (this.state === 'hall') {
       const tap = this.input.consumeTap();
@@ -332,6 +341,10 @@ class Game {
     this.elapsed += dt;
     if (this.bossWarnT > 0) this.bossWarnT -= dt;
     if (this.narration) { this.narration.t -= dt; if (this.narration.t <= 0) this.narration = null; }
+
+    // 祝福图鉴按钮（轻触打开）
+    const utap = this.input.consumeTap();
+    if (utap && this._pointInRect(utap, this.codexBtn)) { this._openCodex(); return; }
 
     if (this.input.consumePress('dash')) {
       if (this.player.tryDash(this.input)) {
@@ -1326,7 +1339,7 @@ class Game {
   }
 
   _renderUI(ctx) {
-    if (this.state === 'playing' || this.state === 'boon' || this.state === 'upgrade') {
+    if (this.state === 'playing' || this.state === 'boon' || this.state === 'upgrade' || this.state === 'codex') {
       this._drawHud(ctx);
       this._drawBoonBar(ctx);
       this._drawBossBar(ctx);
@@ -1335,6 +1348,7 @@ class Game {
       this._drawLowHpVignette(ctx);
       this._drawJoystick(ctx);
       this._drawActionButtons(ctx);
+      this._drawCodexButton(ctx);
       if (this.narration) this._drawNarration(ctx);
       if (this.bossWarnT > 0) this._drawBossWarn(ctx);
     }
@@ -1343,7 +1357,111 @@ class Game {
     if (this.state === 'weaponselect') this._drawWeaponSelect(ctx);
     if (this.state === 'upgrade') this._drawUpgradeOverlay(ctx);
     if (this.state === 'boon') this._drawBoonOverlay(ctx);
+    if (this.state === 'codex') this._drawCodex(ctx);
     if (this.state === 'settlement') this._drawSettlement(ctx);
+  }
+
+  _openCodex() { this.state = 'codex'; this.input.resetAll(); }
+
+  _drawCodexButton(ctx) {
+    const b = this.codexBtn;
+    const P = Config.Palette;
+    ctx.save();
+    ctx.fillStyle = 'rgba(20,12,30,0.6)';
+    ctx.strokeStyle = P.olympusGold;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (ctx.roundRect) { ctx.roundRect(b.x, b.y, b.w, b.h, 8); } else { ctx.rect(b.x, b.y, b.w, b.h); }
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = 'bold 18px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('祝', b.x + b.w / 2, b.y + b.h / 2 + 1);
+    // 已获祝福数角标
+    const n = this.boons.order.length;
+    if (n > 0) {
+      ctx.fillStyle = P.bloodRed;
+      ctx.beginPath(); ctx.arc(b.x + b.w - 4, b.y + 4, 8, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.fillText('' + n, b.x + b.w - 4, b.y + 5);
+    }
+    ctx.restore();
+  }
+
+  // 祝福图鉴 / 当前 Build 详情
+  _drawCodex(ctx) {
+    const P = Config.Palette;
+    const cw = this.cssW, ch = this.cssH;
+    ctx.fillStyle = 'rgba(8,4,16,0.9)';
+    ctx.fillRect(0, 0, cw, ch);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = 'bold 24px serif';
+    ctx.fillText('祝 福 图 鉴 · 当前 Build', cw / 2, 28);
+    ctx.fillStyle = 'rgba(243,233,210,0.55)';
+    ctx.font = '13px sans-serif';
+    ctx.fillText('武器：' + this.player.weapon.name + ' · 称号：' + this.player.rankName(), cw / 2, 60);
+
+    const order = this.boons.order;
+    if (order.length === 0) {
+      ctx.fillStyle = 'rgba(243,233,210,0.6)';
+      ctx.font = '15px sans-serif';
+      ctx.fillText('尚未获得任何祝福', cw / 2, ch / 2);
+    } else {
+      const x = 18, w = cw - 36;
+      const rowH = Math.min(46, (ch - 150) / order.length);
+      let y = 86;
+      for (let i = 0; i < order.length; i++) {
+        const id = order[i];
+        const def = this.boons.def(id);
+        const g = GODS[def.god];
+        const lv = this.boons.level(id);
+        const rarity = this.boons.rarityOf(id);
+        const isDuo = !!def.duo;
+        const effLevel = lv + (isDuo ? 0 : RARITIES[rarity].bonus);
+        const accent = isDuo ? P.olympusGold : RARITIES[rarity].color;
+
+        ctx.fillStyle = 'rgba(24,14,38,0.85)';
+        ctx.fillRect(x, y, w, rowH - 4);
+        ctx.lineWidth = isDuo ? 2.5 : 1.5;
+        ctx.strokeStyle = accent;
+        ctx.strokeRect(x, y, w, rowH - 4);
+
+        // 徽记
+        const bx = x + 20, by = y + (rowH - 4) / 2;
+        ctx.beginPath(); ctx.arc(bx, by, 14, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(10,6,18,0.9)'; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = accent; ctx.stroke();
+        ctx.fillStyle = isDuo ? P.olympusGoldLight : g.color;
+        ctx.font = 'bold 15px serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(def.short, bx, by + 1);
+
+        // 名称 + 等级/品阶
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = isDuo ? P.olympusGoldLight : g.color;
+        ctx.font = 'bold 14px serif';
+        const tag = isDuo ? ' ★契约' : ('  ' + RARITIES[rarity].name + (def.maxLevel > 1 ? ' Lv.' + lv : ''));
+        ctx.fillText(def.name + tag, x + 42, y + 13);
+        // 效果
+        ctx.fillStyle = 'rgba(243,233,210,0.7)';
+        ctx.font = '11px sans-serif';
+        const dl = this._wrapText(ctx, def.desc(effLevel), w - 56);
+        ctx.fillText(dl[0] + (dl.length > 1 ? '…' : ''), x + 42, y + 30);
+
+        y += rowH;
+      }
+    }
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = P.olympusGoldLight;
+    ctx.font = '15px serif';
+    ctx.fillText('轻触关闭', cw / 2, ch - 18);
   }
 
   _drawUpgradeOverlay(ctx) {
@@ -1560,6 +1678,7 @@ class Game {
   _drawBoonBar(ctx) {
     const order = this.boons.order;
     if (order.length === 0) return;
+    const P = Config.Palette;
     const x0 = 20, y0 = 100, s = 24, gap = 6;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1568,18 +1687,37 @@ class Game {
       const def = this.boons.def(id);
       const lv = this.boons.level(id);
       const g = GODS[def.god];
+      const isDuo = !!def.duo;
+      const rarity = this.boons.rarityOf(id);
+      const ring = isDuo ? P.olympusGold : RARITIES[rarity].color;
       const x = x0 + i * (s + gap);
+      const cx = x + s / 2, cy = y0 + s / 2;
+      // 契约：脉动金色外环
+      if (isDuo) {
+        ctx.globalAlpha = 0.5 + 0.4 * Math.sin(this.uiTime * 5);
+        ctx.strokeStyle = P.olympusGold;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(cx, cy, s / 2 + 3, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       ctx.beginPath();
-      ctx.arc(x + s / 2, y0 + s / 2, s / 2, 0, Math.PI * 2);
+      ctx.arc(cx, cy, s / 2, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(20,12,30,0.7)';
       ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = g.accent;
+      ctx.lineWidth = isDuo ? 2.5 : 2;
+      ctx.strokeStyle = ring;
       ctx.stroke();
-      ctx.fillStyle = g.color;
+      ctx.fillStyle = isDuo ? P.olympusGoldLight : g.color;
       ctx.font = 'bold 14px serif';
-      ctx.fillText(def.short, x + s / 2, y0 + s / 2 + 1);
-      ctx.fillStyle = Config.Palette.olympusGoldLight;
+      ctx.fillText(def.short, cx, cy + 1);
+      // 契约星标
+      if (isDuo) {
+        ctx.fillStyle = P.olympusGoldLight;
+        ctx.font = '9px serif';
+        ctx.fillText('★', cx, y0 - 5);
+      }
+      // 等级点（颜色随品阶）
+      ctx.fillStyle = ring;
       for (let k = 0; k < lv; k++) {
         ctx.beginPath();
         ctx.arc(x + 4 + k * 5, y0 + s + 3, 2, 0, Math.PI * 2);
@@ -1711,11 +1849,39 @@ class Game {
     const accent = c.isDuo ? P.olympusGold : rar.color;
     const titleColor = def.gold ? P.olympusGoldLight : g.color;
 
+    // 契约卡专属：脉动金色光晕 + 角落星火
+    if (c.isDuo) {
+      const pulse = 0.5 + 0.5 * Math.sin(this.uiTime * 4);
+      ctx.save();
+      ctx.globalAlpha = 0.25 + 0.35 * pulse;
+      ctx.strokeStyle = P.olympusGoldLight;
+      ctx.lineWidth = 6;
+      ctx.strokeRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6);
+      ctx.restore();
+    }
+
     ctx.fillStyle = c.isDuo ? 'rgba(34,22,10,0.96)' : 'rgba(24,14,38,0.96)';
     ctx.fillRect(r.x, r.y, r.w, r.h);
     ctx.lineWidth = c.isDuo ? 3.5 : 2.5;
     ctx.strokeStyle = accent;
     ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+    if (c.isDuo) {
+      // 沿边游动的星火
+      ctx.fillStyle = P.olympusGoldLight;
+      for (let k = 0; k < 5; k++) {
+        const t = (this.uiTime * 0.4 + k / 5) % 1;
+        const peri = 2 * (r.w + r.h);
+        let d = t * peri, px, py;
+        if (d < r.w) { px = r.x + d; py = r.y; }
+        else if (d < r.w + r.h) { px = r.x + r.w; py = r.y + (d - r.w); }
+        else if (d < 2 * r.w + r.h) { px = r.x + r.w - (d - r.w - r.h); py = r.y + r.h; }
+        else { px = r.x; py = r.y + r.h - (d - 2 * r.w - r.h); }
+        ctx.globalAlpha = 0.6 + 0.4 * Math.sin(this.uiTime * 6 + k);
+        ctx.beginPath(); ctx.arc(px, py, 2.2, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
 
     const badgeX = r.x + 40, badgeY = r.y + r.h / 2;
     ctx.beginPath();
