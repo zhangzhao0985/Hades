@@ -40,6 +40,8 @@ class Player {
     this.armor = 0;        // 护甲：每次受击的固定减伤
     this.slowMul = 1;      // 减速倍率（蛛丝）
     this.slowTimer = 0;
+    this.moveSpeedMul = 1; // 赫尔墨斯：移动加速
+    this.attackSpeedMul = 1; // 赫尔墨斯：攻击加速
 
     // Boss 击败成长：骑士等级 + 武器升级次数
     this.rank = 0;        // 0~5，对应六等骑士
@@ -125,7 +127,7 @@ class Player {
       this.vx = damp(this.vx, 0, 10, dt);
       this.vy = damp(this.vy, 0, 10, dt);
     } else {
-      const moveScale = (this.attacking ? this.weapon.moveScale : 1) * this.slowMul;
+      const moveScale = (this.attacking ? this.weapon.moveScale : 1) * this.slowMul * this.moveSpeedMul;
       const targetVx = js.dx * this.speed * moveScale;
       const targetVy = js.dy * this.speed * moveScale;
       this.vx = damp(this.vx, targetVx, Config.player.moveDamp, dt);
@@ -174,10 +176,10 @@ class Player {
       } else {
         this.comboIndex = 0;
       }
-      this.attackCd = this._attackDuration() + w.gap;
+      this.attackCd = (this._attackDuration() + w.gap) / this.attackSpeedMul;
     } else {
       this.comboIndex = 0;
-      this.attackCd = w.fireInterval;
+      this.attackCd = w.fireInterval / this.attackSpeedMul;
     }
     this.timeSinceSwing = 0;
     return true;

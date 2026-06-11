@@ -392,6 +392,9 @@ class Game {
   addShake(a) { this.shake = clamp(this.shake + a, 0, 1); }
 
   // ---- 攻击 / 特殊 / 大招 ----
+  // 自动锁敌最大距离 = 4 × 角色身位(直径)
+  _autoLockCap() { return this.player.radius * 2 * Config.player.autoLockDiameters; }
+
   // 最近的存活敌人（忽略仍在破土的）
   _nearestEnemy(x, y) {
     let best = null, bd = Infinity;
@@ -412,9 +415,10 @@ class Game {
     if (!target) return;
     const w = pl.weapon;
     const d = dist(pl.x, pl.y, target.x, target.y);
-    const range = (w.type === 'melee')
+    let range = (w.type === 'melee')
       ? (w.reach + pl.radius + pl.meleeReachBonus() + target.radius + 12)
       : ((w.arrowRange || 760) * 0.95);
+    range = Math.min(range, this._autoLockCap()); // 锁敌范围不超过 4 个身位
     if (d > range) return;
     const ang = Math.atan2(target.y - pl.y, target.x - pl.x);
     if (pl.tryAttack(this.input, ang)) this._onAttackFired();
@@ -609,8 +613,9 @@ class Game {
     const pl = this.player;
     if (pl.dead || pl.dashing || pl.specialCd > 0) return;
     const w = pl.weapon;
-    // 旋斩需有近敌；散射需射程内有敌
-    const range = w.type === 'melee' ? (w.special.radius + 40) : ((w.arrowRange || 760) * 0.9);
+    // 旋斩需有近敌；散射需射程内有敌（同样受锁敌范围限制）
+    let range = w.type === 'melee' ? (w.special.radius + 40) : ((w.arrowRange || 760) * 0.9);
+    range = Math.min(range, this._autoLockCap());
     const target = this._nearestEnemy(pl.x, pl.y);
     if (!target || dist(pl.x, pl.y, target.x, target.y) > range) return;
     if (w.type === 'ranged') pl.specialDir = Math.atan2(target.y - pl.y, target.x - pl.x);
@@ -788,11 +793,18 @@ class Game {
     let dmg = base + m.bonusAttackDamage + (this.metaAtk || 0);
     let kb = knockback;
     if (m.poseidon.active) { dmg += m.poseidon.impactDamage; kb *= m.poseidon.knockbackMul; }
+    // 阿尔忒弥斯暴击
+    let crit = false;
+    if (m.artemis.active && Math.random() < m.artemis.chance) { dmg *= m.artemis.mult; crit = true; }
     en.takeDamage(dmg, fromX, fromY, kb, hitstun);
     if (m.ares.active) en.applyBleed(m.ares.dps, m.ares.duration);
     if (m.aphrodite.active) en.applyWeak(m.aphrodite.weakMul, m.aphrodite.duration);
+    if (m.hestia.active) en.applyBurn(m.hestia.dps, m.hestia.duration);
+    if (m.dionysus.active) en.applyBurn(m.dionysus.dps, m.dionysus.duration);
+    if (m.demeter.active) en.applyChill(m.demeter.slowMul, m.demeter.duration);
     this.effects.spawn('hit', { x: en.x, y: en.y, angle: Math.atan2(en.y - fromY, en.x - fromX), dur: 0.2, color: hitColor || Config.Palette.spark });
-    this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: Math.round(dmg), vy: -70, dur: 0.6, color: Config.Palette.olympusGoldLight });
+    this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: (crit ? '✦' : '') + Math.round(dmg), vy: -70, dur: crit ? 0.75 : 0.6, color: crit ? '#9fe6a0' : Config.Palette.olympusGoldLight });
+    if (crit) this.addShake(0.12);
     this.player.gainEnergy(Config.player.energyPerHit);
     this.audio.play('hit');
     if (m.zeus.active && (!opts || opts.chain !== false)) this._chainLightning(en, m.zeus);
@@ -990,11 +1002,12 @@ class Game {
     for (let i = 0; i < this.enemies.length; i++) {
       const e = this.enemies[i];
       if (!e.isAlive()) continue;
-      if (e.bleedTimer > 0) {
+      if (e.bleedTimer > 0 || e.burnTimer > 0) {
         e._bleedTick = (e._bleedTick || 0) + dt;
         if (e._bleedTick >= 0.3) {
           e._bleedTick = 0;
-          this.effects.spawn('dmg', { x: e.x + (Math.random() * 16 - 8), y: e.y - e.radius, text: '·', vy: -28, dur: 0.4, color: Config.Palette.bloodRedLight });
+          const col = e.burnTimer > 0 ? '#ff8a3d' : Config.Palette.bloodRedLight;
+          this.effects.spawn('dmg', { x: e.x + (Math.random() * 16 - 8), y: e.y - e.radius, text: '·', vy: -28, dur: 0.4, color: col });
         }
       }
       e.updateStatus(dt);
@@ -1044,6 +1057,8 @@ class Game {
       this.effects.spawn('death', { x: e.x, y: e.y, dur: e.isBoss() ? 0.7 : 0.35, color: col });
       this.addShake(e.isBoss() ? 0.7 : (e.tier === 'elite' ? 0.4 : 0.28));
       this._spawnDrops(e);
+      // 收割之契：击杀回血
+      if (this.boons.mods.killHeal > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + this.boons.mods.killHeal);
       if (e.tier === 'elite' || e.isBoss()) this.pendingBoons++;
       if (e.isBoss()) {
         this.bossAlive = false;
@@ -1138,6 +1153,8 @@ class Game {
     const m = this.boons.mods;
     this.player.maxHp = this._baseMaxHp() + m.bonusMaxHp;
     this.player.maxStamina = Config.player.maxStamina + this.meta.stamBonus() + m.bonusMaxStamina;
+    this.player.moveSpeedMul = m.hermes.moveMul;     // 赫尔墨斯
+    this.player.attackSpeedMul = m.hermes.atkMul;
     const heal = this.player.maxHp - prevMaxHp;
     if (heal > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + heal);
     this.audio.play('boon');

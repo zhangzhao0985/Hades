@@ -8,6 +8,11 @@ const GODS = {
   athena:    { name: '雅典娜',   color: '#cfe8ff', accent: '#9ec9ff' },
   ares:      { name: '阿瑞斯',   color: '#ff6f5e', accent: '#d23b2e' },
   aphrodite: { name: '阿芙洛狄忒', color: '#ff9ed2', accent: '#e86bb0' },
+  artemis:   { name: '阿尔忒弥斯', color: '#9fe6a0', accent: '#4eae5a' },
+  demeter:   { name: '得墨忒耳', color: '#bfe9ff', accent: '#7fc6e6' },
+  dionysus:  { name: '狄俄尼索斯', color: '#c79bff', accent: '#8a5fd0' },
+  hermes:    { name: '赫尔墨斯', color: '#ffe9a8', accent: '#f5c542' },
+  hestia:    { name: '赫斯提亚', color: '#ffb070', accent: '#ff6a2b' },
   styx:      { name: '冥河之力', color: '#c9a8ff', accent: '#8a5fd0' } // 被动增益
 };
 
@@ -34,6 +39,30 @@ const BOON_DEFS = [
     desc: (lv) => `闪避无敌时撞击敌人将其击退，并造成 ${14 + lv * 8} 点伤害`
   },
   {
+    id: 'artemis_crit', god: 'artemis', name: '猎手印记', short: '猎', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中有 ${15 + lv * 8}% 概率暴击，造成 ${Math.round((1.5 + lv * 0.25) * 100)}% 伤害`
+  },
+  {
+    id: 'demeter_chill', god: 'demeter', name: '凛冬之触', short: '凛', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中冰缓，敌人移速降低 ${Math.round((1 - Math.max(0.4, 0.8 - 0.12 * lv)) * 100)}%，持续 3 秒`
+  },
+  {
+    id: 'dionysus_poison', god: 'dionysus', name: '宿醉毒雾', short: '醉', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中中毒，每秒 ${5 + lv * 4} 点，持续 4 秒`
+  },
+  {
+    id: 'hestia_burn', god: 'hestia', name: '不灭灶火', short: '焰', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中点燃，每秒 ${8 + lv * 5} 点，持续 3 秒`
+  },
+  {
+    id: 'hermes_swift', god: 'hermes', name: '疾风之足', short: '疾', slot: '被动', maxLevel: 3,
+    desc: (lv) => `移动速度 +${10 + lv * 6}%、攻击速度 +${8 + lv * 7}%`
+  },
+  {
+    id: 'styx_reaper', god: 'styx', name: '收割之契', short: '割', slot: '被动', maxLevel: 3,
+    desc: (lv) => `击杀敌人回复 ${4 + lv * 3} 点生命`
+  },
+  {
     id: 'styx_vitality', god: 'styx', name: '不灭血脉', short: '命', slot: '被动', maxLevel: 4,
     desc: (lv) => `最大生命 +${25 * lv}（获得时回复等量生命）`
   },
@@ -55,11 +84,17 @@ function baseMods() {
     bonusAttackDamage: 0,
     bonusMaxHp: 0,
     bonusMaxStamina: 0,
+    killHeal: 0,
     zeus: { active: false, jumps: 0, damage: 0, range: 0 },
     poseidon: { active: false, knockbackMul: 1, impactDamage: 0 },
     ares: { active: false, dps: 0, duration: 0 },
     aphrodite: { active: false, weakMul: 1, duration: 0 },
-    athena: { active: false, damage: 0, knockback: 0 }
+    athena: { active: false, damage: 0, knockback: 0 },
+    artemis: { active: false, chance: 0, mult: 1.5 },
+    demeter: { active: false, slowMul: 1, duration: 0 },
+    dionysus: { active: false, dps: 0, duration: 0 },
+    hestia: { active: false, dps: 0, duration: 0 },
+    hermes: { active: false, moveMul: 1, atkMul: 1 }
   };
 }
 
@@ -125,6 +160,18 @@ class BoonManager {
           m.bonusAttackDamage += 6 * lv; break;
         case 'styx_stamina':
           m.bonusMaxStamina += 25 * lv; break;
+        case 'artemis_crit':
+          m.artemis.active = true; m.artemis.chance = 0.15 + lv * 0.08; m.artemis.mult = 1.5 + lv * 0.25; break;
+        case 'demeter_chill':
+          m.demeter.active = true; m.demeter.slowMul = Math.max(0.4, 0.8 - 0.12 * lv); m.demeter.duration = 3; break;
+        case 'dionysus_poison':
+          m.dionysus.active = true; m.dionysus.dps = 5 + lv * 4; m.dionysus.duration = 4; break;
+        case 'hestia_burn':
+          m.hestia.active = true; m.hestia.dps = 8 + lv * 5; m.hestia.duration = 3; break;
+        case 'hermes_swift':
+          m.hermes.active = true; m.hermes.moveMul = 1 + (0.10 + lv * 0.06); m.hermes.atkMul = 1 + (0.08 + lv * 0.07); break;
+        case 'styx_reaper':
+          m.killHeal += 4 + lv * 3; break;
       }
     }
     this.mods = m;

@@ -47,6 +47,11 @@ class Enemy {
     this.weakTimer = 0;
     this.deflectCd = 0;
     this.swordHitCd = 0; // 玩家剑刃大招的每敌命中冷却
+    // 灼烧/中毒（赫斯提亚/狄俄尼索斯）与冰缓（得墨忒耳）
+    this.burnDps = 0;
+    this.burnTimer = 0;
+    this.chillMul = 1;
+    this.chillTimer = 0;
 
     // 远程
     this.wantsFire = false;
@@ -122,6 +127,9 @@ class Enemy {
         this.skillCd = rnd(this.def.skillCdMin, this.def.skillCdMax) * mul;
       }
     }
+
+    // 冰缓：降低本帧移动
+    if (this.chillTimer > 0) { this.vx *= this.chillMul; this.vy *= this.chillMul; }
 
     this.x += this.vx * dt;
     this.y += this.vy * dt;
@@ -245,11 +253,14 @@ class Enemy {
 
   updateStatus(dt) {
     if (this.weakTimer > 0) { this.weakTimer -= dt; if (this.weakTimer <= 0) this.weakMul = 1; }
+    if (this.chillTimer > 0) { this.chillTimer -= dt; if (this.chillTimer <= 0) this.chillMul = 1; }
     let died = false;
-    if (this.bleedTimer > 0 && this.state !== 'dead') {
-      this.bleedTimer -= dt;
+    if (this.state !== 'dead' && (this.bleedTimer > 0 || this.burnTimer > 0)) {
+      let dps = 0;
+      if (this.bleedTimer > 0) { this.bleedTimer -= dt; dps += this.bleedDps; }
+      if (this.burnTimer > 0) { this.burnTimer -= dt; dps += this.burnDps; }
       const before = this.hp;
-      this.hp -= this.bleedDps * dt;
+      this.hp -= dps * dt;
       this.hpFlash = Math.max(this.hpFlash, 0.03);
       if (before > 0 && this.hp <= 0) {
         this.hp = 0; this.state = 'dead'; this.deadTimer = this.isBoss() ? 0.7 : 0.35;
@@ -285,6 +296,14 @@ class Enemy {
   applyBleed(dps, dur) {
     this.bleedDps = Math.max(this.bleedDps, dps);
     this.bleedTimer = Math.max(this.bleedTimer, dur);
+  }
+  applyBurn(dps, dur) {
+    this.burnDps = Math.max(this.burnDps, dps);
+    this.burnTimer = Math.max(this.burnTimer, dur);
+  }
+  applyChill(mul, dur) {
+    this.chillMul = Math.min(this.chillMul, mul);
+    this.chillTimer = Math.max(this.chillTimer, dur);
   }
   applyWeak(mul, dur) {
     this.weakMul = mul;
@@ -368,6 +387,18 @@ class Enemy {
       ctx.strokeStyle = '#ff9ed2';
       ctx.globalAlpha = 0.6; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(this.x, this.y, this.radius + 8, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    if (this.burnTimer > 0) {
+      ctx.strokeStyle = '#ff8a3d';
+      ctx.globalAlpha = 0.6; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.radius + 6, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    if (this.chillTimer > 0) {
+      ctx.strokeStyle = '#bfe9ff';
+      ctx.globalAlpha = 0.7; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.radius + 10, 0, Math.PI * 2); ctx.stroke();
       ctx.globalAlpha = 1;
     }
   }
