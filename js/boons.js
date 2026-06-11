@@ -1,7 +1,6 @@
-// js/boons.js —— 祝福系统（God Boons）：神祇、祝福定义、可叠加的 BoonManager
-// 设计为数据驱动：新增祝福只需往 BOON_DEFS 加一条，并在 recompute() 里描述其聚合效果。
+// js/boons.js —— 祝福系统（God Boons）：神祇、祝福、品阶(稀有度)、契约(Duo) + BoonManager
+// 数据驱动：BOON_DEFS 加普通祝福，DUO_DEFS 加契约；recompute() 聚合效果（按 effLevel = 等级 + 品阶加成）。
 
-// 神祇主题色（用于卡片与 Build 图标）
 const GODS = {
   zeus:      { name: '宙斯',     color: '#ffe08a', accent: '#f5c542' },
   poseidon:  { name: '波塞冬',   color: '#8fd0ff', accent: '#4ea3ff' },
@@ -13,71 +12,72 @@ const GODS = {
   dionysus:  { name: '狄俄尼索斯', color: '#c79bff', accent: '#8a5fd0' },
   hermes:    { name: '赫尔墨斯', color: '#ffe9a8', accent: '#f5c542' },
   hestia:    { name: '赫斯提亚', color: '#ffb070', accent: '#ff6a2b' },
-  styx:      { name: '冥河之力', color: '#c9a8ff', accent: '#8a5fd0' } // 被动增益
+  styx:      { name: '冥河之力', color: '#c9a8ff', accent: '#8a5fd0' },
+  duo:       { name: '契约',     color: '#ffd76a', accent: '#ff8a3d' }
 };
 
-// 祝福定义。desc(lv) 描述「升到该等级后」的效果。
+// 品阶：稀有度越高，等效等级越高（数值更强）
+const RARITIES = [
+  { id: 0, name: '普通', color: '#cfd6e0', bonus: 0, weight: 64 },
+  { id: 1, name: '稀有', color: '#5aa9ff', bonus: 1, weight: 28 },
+  { id: 2, name: '传说', color: '#ffd54a', bonus: 2, weight: 8 }
+];
+function rollRarity() {
+  let total = 0;
+  for (const r of RARITIES) total += r.weight;
+  let x = Math.random() * total;
+  for (const r of RARITIES) { x -= r.weight; if (x <= 0) return r.id; }
+  return 0;
+}
+
+const DUO_CHANCE = 0.42;
+
 const BOON_DEFS = [
-  {
-    id: 'zeus_chain', god: 'zeus', name: '雷霆万钧', short: '雷', slot: '普攻', maxLevel: 3,
-    desc: (lv) => `命中时引发连锁闪电，跳跃 ${1 + lv} 次，每次 ${8 + lv * 4} 点伤害`
-  },
-  {
-    id: 'poseidon_strike', god: 'poseidon', name: '惊涛裂岸', short: '涛', slot: '普攻', maxLevel: 3, gold: true,
-    desc: (lv) => `攻击击退大幅增强，并附加 ${6 + lv * 4} 点撞击伤害`
-  },
-  {
-    id: 'ares_bleed', god: 'ares', name: '血怒', short: '怒', slot: '普攻', maxLevel: 3,
-    desc: (lv) => `命中使敌人流血，每秒 ${6 + lv * 4} 点，持续 3 秒`
-  },
-  {
-    id: 'aphrodite_weak', god: 'aphrodite', name: '魅惑', short: '媚', slot: '普攻', maxLevel: 3,
-    desc: (lv) => `命中使敌人虚弱，伤害降低 ${Math.round((1 - Math.max(0.4, 0.75 - 0.1 * lv)) * 100)}%，持续 4 秒`
-  },
-  {
-    id: 'athena_deflect', god: 'athena', name: '神圣冲刺', short: '盾', slot: '闪避', maxLevel: 3,
-    desc: (lv) => `闪避无敌时撞击敌人将其击退，并造成 ${14 + lv * 8} 点伤害`
-  },
-  {
-    id: 'artemis_crit', god: 'artemis', name: '猎手印记', short: '猎', slot: '普攻', maxLevel: 3,
-    desc: (lv) => `命中有 ${15 + lv * 8}% 概率暴击，造成 ${Math.round((1.5 + lv * 0.25) * 100)}% 伤害`
-  },
-  {
-    id: 'demeter_chill', god: 'demeter', name: '凛冬之触', short: '凛', slot: '普攻', maxLevel: 3,
-    desc: (lv) => `命中冰缓，敌人移速降低 ${Math.round((1 - Math.max(0.4, 0.8 - 0.12 * lv)) * 100)}%，持续 3 秒`
-  },
-  {
-    id: 'dionysus_poison', god: 'dionysus', name: '宿醉毒雾', short: '醉', slot: '普攻', maxLevel: 3,
-    desc: (lv) => `命中中毒，每秒 ${5 + lv * 4} 点，持续 4 秒`
-  },
-  {
-    id: 'hestia_burn', god: 'hestia', name: '不灭灶火', short: '焰', slot: '普攻', maxLevel: 3,
-    desc: (lv) => `命中点燃，每秒 ${8 + lv * 5} 点，持续 3 秒`
-  },
-  {
-    id: 'hermes_swift', god: 'hermes', name: '疾风之足', short: '疾', slot: '被动', maxLevel: 3,
-    desc: (lv) => `移动速度 +${10 + lv * 6}%、攻击速度 +${8 + lv * 7}%`
-  },
-  {
-    id: 'styx_reaper', god: 'styx', name: '收割之契', short: '割', slot: '被动', maxLevel: 3,
-    desc: (lv) => `击杀敌人回复 ${4 + lv * 3} 点生命`
-  },
-  {
-    id: 'styx_vitality', god: 'styx', name: '不灭血脉', short: '命', slot: '被动', maxLevel: 4,
-    desc: (lv) => `最大生命 +${25 * lv}（获得时回复等量生命）`
-  },
-  {
-    id: 'styx_strength', god: 'styx', name: '冥王之力', short: '力', slot: '被动', maxLevel: 4, gold: true,
-    desc: (lv) => `普通攻击伤害 +${6 * lv}`
-  },
-  {
-    id: 'styx_stamina', god: 'styx', name: '不竭之息', short: '耐', slot: '被动', maxLevel: 4,
-    desc: (lv) => `最大体力 +${25 * lv}`
-  }
+  { id: 'zeus_chain', god: 'zeus', name: '雷霆万钧', short: '雷', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中时引发连锁闪电，跳跃 ${1 + lv} 次，每次 ${8 + lv * 4} 点伤害` },
+  { id: 'poseidon_strike', god: 'poseidon', name: '惊涛裂岸', short: '涛', slot: '普攻', maxLevel: 3, gold: true,
+    desc: (lv) => `攻击击退大幅增强，并附加 ${6 + lv * 4} 点撞击伤害` },
+  { id: 'ares_bleed', god: 'ares', name: '血怒', short: '怒', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中使敌人流血，每秒 ${6 + lv * 4} 点，持续 3 秒` },
+  { id: 'aphrodite_weak', god: 'aphrodite', name: '魅惑', short: '媚', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中使敌人虚弱，伤害降低 ${Math.round((1 - Math.max(0.4, 0.75 - 0.1 * lv)) * 100)}%，持续 4 秒` },
+  { id: 'athena_deflect', god: 'athena', name: '神圣冲刺', short: '盾', slot: '闪避', maxLevel: 3,
+    desc: (lv) => `闪避无敌时撞击敌人将其击退，并造成 ${14 + lv * 8} 点伤害` },
+  { id: 'artemis_crit', god: 'artemis', name: '猎手印记', short: '猎', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中有 ${15 + lv * 8}% 概率暴击，造成 ${Math.round((1.5 + lv * 0.25) * 100)}% 伤害` },
+  { id: 'demeter_chill', god: 'demeter', name: '凛冬之触', short: '凛', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中冰缓，敌人移速降低 ${Math.round((1 - Math.max(0.4, 0.8 - 0.12 * lv)) * 100)}%，持续 3 秒` },
+  { id: 'dionysus_poison', god: 'dionysus', name: '宿醉毒雾', short: '醉', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中中毒，每秒 ${5 + lv * 4} 点，持续 4 秒` },
+  { id: 'hestia_burn', god: 'hestia', name: '不灭灶火', short: '焰', slot: '普攻', maxLevel: 3,
+    desc: (lv) => `命中点燃，每秒 ${8 + lv * 5} 点，持续 3 秒` },
+  { id: 'hermes_swift', god: 'hermes', name: '疾风之足', short: '疾', slot: '被动', maxLevel: 3,
+    desc: (lv) => `移动速度 +${10 + lv * 6}%、攻击速度 +${8 + lv * 7}%` },
+  { id: 'styx_reaper', god: 'styx', name: '收割之契', short: '割', slot: '被动', maxLevel: 3,
+    desc: (lv) => `击杀敌人回复 ${4 + lv * 3} 点生命` },
+  { id: 'styx_vitality', god: 'styx', name: '不灭血脉', short: '命', slot: '被动', maxLevel: 4,
+    desc: (lv) => `最大生命 +${25 * lv}（获得时回复等量生命）` },
+  { id: 'styx_strength', god: 'styx', name: '冥王之力', short: '力', slot: '被动', maxLevel: 4, gold: true,
+    desc: (lv) => `普通攻击伤害 +${6 * lv}` },
+  { id: 'styx_stamina', god: 'styx', name: '不竭之息', short: '耐', slot: '被动', maxLevel: 4,
+    desc: (lv) => `最大体力 +${25 * lv}` }
+];
+
+// 契约（Duo）：需同时拥有两位神祇的祝福才会出现
+const DUO_DEFS = [
+  { id: 'duo_storm', duo: true, god: 'duo', gods: ['zeus', 'poseidon'], name: '风暴之心', short: '暴', slot: '契约·宙斯+波塞冬', maxLevel: 2,
+    desc: (lv) => `命中有 ${20 + lv * 10}% 几率引爆雷暴，对周围造成 ${30 + lv * 15} 点伤害` },
+  { id: 'duo_hunt', duo: true, god: 'duo', gods: ['ares', 'artemis'], name: '嗜血狩猎', short: '狩', slot: '契约·阿瑞斯+阿尔忒弥斯', maxLevel: 2,
+    desc: (lv) => `暴击率额外 +${10 + lv * 5}%，且暴击会使目标流血` },
+  { id: 'duo_frostfire', duo: true, god: 'duo', gods: ['hestia', 'demeter'], name: '冰火湮灭', short: '湮', slot: '契约·赫斯提亚+得墨忒耳', maxLevel: 2,
+    desc: (lv) => `对同时灼烧且冰缓的敌人，命中额外造成 ${25 + lv * 15} 点伤害` },
+  { id: 'duo_toxin', duo: true, god: 'duo', gods: ['aphrodite', 'dionysus'], name: '致命毒素', short: '毒', slot: '契约·阿芙洛狄忒+狄俄尼索斯', maxLevel: 2,
+    desc: (lv) => `对同时中毒且虚弱的敌人，命中额外造成 ${20 + lv * 12} 点伤害` }
 ];
 
 const DEF_BY_ID = {};
 for (const d of BOON_DEFS) DEF_BY_ID[d.id] = d;
+for (const d of DUO_DEFS) DEF_BY_ID[d.id] = d;
 
 function baseMods() {
   return {
@@ -94,55 +94,76 @@ function baseMods() {
     demeter: { active: false, slowMul: 1, duration: 0 },
     dionysus: { active: false, dps: 0, duration: 0 },
     hestia: { active: false, dps: 0, duration: 0 },
-    hermes: { active: false, moveMul: 1, atkMul: 1 }
+    hermes: { active: false, moveMul: 1, atkMul: 1 },
+    duoStorm: { active: false, chance: 0, damage: 0, radius: 170 },
+    duoHunt: { active: false, critBonus: 0, bleedDps: 10 },
+    duoFrostfire: { active: false, bonus: 0 },
+    duoToxin: { active: false, bonus: 0 }
   };
 }
 
 class BoonManager {
   constructor() {
-    this.owned = {};       // id -> level
-    this.order = [];       // 获得顺序（用于 Build 图标展示）
+    this.owned = {};       // id -> { level, rarity }
+    this.order = [];
     this.mods = baseMods();
   }
 
-  reset() {
-    this.owned = {};
-    this.order = [];
-    this.recompute();
-  }
+  reset() { this.owned = {}; this.order = []; this.recompute(); }
 
   has(id) { return !!this.owned[id]; }
-  level(id) { return this.owned[id] || 0; }
+  level(id) { return this.owned[id] ? this.owned[id].level : 0; }
+  rarityOf(id) { return this.owned[id] ? this.owned[id].rarity : 0; }
   def(id) { return DEF_BY_ID[id]; }
+  isMax(id) { const d = DEF_BY_ID[id]; return d ? this.level(id) >= d.maxLevel : true; }
 
-  add(id) {
+  add(id, rarity) {
     const def = DEF_BY_ID[id];
     if (!def) return;
-    const cur = this.owned[id] || 0;
-    if (cur === 0) this.order.push(id);
-    this.owned[id] = Math.min(def.maxLevel, cur + 1);
+    const cur = this.owned[id];
+    if (!cur) this.order.push(id);
+    const level = Math.min(def.maxLevel, (cur ? cur.level : 0) + 1);
+    const r = Math.max(cur ? cur.rarity : 0, rarity || 0);
+    this.owned[id] = { level: level, rarity: r };
     this.recompute();
   }
 
-  // 随机抽取 n 个可选祝福（未拥有或未满级），返回 { def, nextLevel }
+  _ownedGods() {
+    const s = new Set();
+    for (const id in this.owned) {
+      const d = DEF_BY_ID[id];
+      if (d && !d.duo) s.add(d.god);
+    }
+    return s;
+  }
+
+  // 抽取 n 个可选项：可能含一个已满足前置的契约，其余为普通祝福（各带随机品阶）
   getChoices(n) {
-    const pool = BOON_DEFS.filter((d) => (this.owned[d.id] || 0) < d.maxLevel);
-    // Fisher-Yates 洗牌
+    const choices = [];
+    let slots = n;
+    const ownedGods = this._ownedGods();
+    const duos = DUO_DEFS.filter((d) => this.level(d.id) < d.maxLevel && d.gods.every((g) => ownedGods.has(g)));
+    if (duos.length && Math.random() < DUO_CHANCE) {
+      const d = duos[Math.floor(Math.random() * duos.length)];
+      choices.push({ def: d, nextLevel: this.level(d.id) + 1, rarity: 0, isDuo: true });
+      slots--;
+    }
+    const pool = BOON_DEFS.filter((b) => this.level(b.id) < b.maxLevel);
     for (let i = pool.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       const t = pool[i]; pool[i] = pool[j]; pool[j] = t;
     }
-    return pool.slice(0, Math.min(n, pool.length)).map((d) => ({
-      def: d,
-      nextLevel: (this.owned[d.id] || 0) + 1
-    }));
+    for (const b of pool.slice(0, Math.max(0, slots))) {
+      choices.push({ def: b, nextLevel: this.level(b.id) + 1, rarity: rollRarity() });
+    }
+    return choices;
   }
 
-  // 依据已拥有祝福聚合出战斗用的 mods
   recompute() {
     const m = baseMods();
     for (const id in this.owned) {
-      const lv = this.owned[id];
+      const o = this.owned[id];
+      const lv = o.level + RARITIES[o.rarity].bonus; // 等效等级
       switch (id) {
         case 'zeus_chain':
           m.zeus.active = true; m.zeus.jumps = 1 + lv; m.zeus.damage = 8 + lv * 4; m.zeus.range = 280; break;
@@ -172,10 +193,18 @@ class BoonManager {
           m.hermes.active = true; m.hermes.moveMul = 1 + (0.10 + lv * 0.06); m.hermes.atkMul = 1 + (0.08 + lv * 0.07); break;
         case 'styx_reaper':
           m.killHeal += 4 + lv * 3; break;
+        case 'duo_storm':
+          m.duoStorm.active = true; m.duoStorm.chance = 0.20 + lv * 0.10; m.duoStorm.damage = 30 + lv * 15; break;
+        case 'duo_hunt':
+          m.duoHunt.active = true; m.duoHunt.critBonus = 0.10 + lv * 0.05; break;
+        case 'duo_frostfire':
+          m.duoFrostfire.active = true; m.duoFrostfire.bonus = 25 + lv * 15; break;
+        case 'duo_toxin':
+          m.duoToxin.active = true; m.duoToxin.bonus = 20 + lv * 12; break;
       }
     }
     this.mods = m;
   }
 }
 
-module.exports = { BoonManager, BOON_DEFS, GODS };
+module.exports = { BoonManager, BOON_DEFS, DUO_DEFS, GODS, RARITIES };

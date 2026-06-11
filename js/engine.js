@@ -7,7 +7,7 @@ const Camera = require('./camera.js');
 const Enemy = require('./enemy.js');
 const EffectsManager = require('./effects.js');
 const ProjectileManager = require('./projectile.js');
-const { BoonManager, GODS } = require('./boons.js');
+const { BoonManager, GODS, RARITIES } = require('./boons.js');
 const { WEAPONS, WEAPON_LIST } = require('./weapons.js');
 const { MetaProgress, UPGRADES } = require('./meta.js');
 const AudioManager = require('./audio.js');
@@ -310,7 +310,7 @@ class Game {
       const tap = this.input.consumeTap();
       if (tap) {
         for (const c of this.boonChoices) {
-          if (this._pointInRect(tap, c.rect)) { this._applyBoon(c.def.id); break; }
+          if (this._pointInRect(tap, c.rect)) { this._applyBoon(c); break; }
         }
       }
       return;
@@ -586,15 +586,25 @@ class Game {
   _executeSpecial() {
     const w = this.player.weapon;
     if (w.type === 'melee') {
+      // 旋斩：击退周边敌人并造成伤害，同时抵挡敌方飞行物
       const sp = w.special;
-      this.effects.spawn('shock', { x: this.player.x, y: this.player.y, maxR: sp.radius, dur: 0.35, color: w.color });
+      const px = this.player.x, py = this.player.y;
+      this.effects.spawn('shock', { x: px, y: py, maxR: sp.radius, dur: 0.35, color: w.color });
       for (let i = 0; i < this.enemies.length; i++) {
         const en = this.enemies[i];
         if (!en.isAlive()) continue;
-        if (dist(en.x, en.y, this.player.x, this.player.y) <= sp.radius + en.radius) {
-          this._damageEnemy(en, sp.damage, this.player.x, this.player.y, sp.knockback, 0.25, w.color);
+        if (dist(en.x, en.y, px, py) <= sp.radius + en.radius) {
+          this._damageEnemy(en, sp.damage, px, py, sp.knockback, 0.25, w.color);
         }
       }
+      // 抵挡范围内的敌方飞行物
+      this.projectiles.forEachActive((pr) => {
+        if (pr.team !== 'enemy') return;
+        if (dist(pr.x, pr.y, px, py) <= sp.radius + pr.radius) {
+          pr.active = false;
+          this.effects.spawn('hit', { x: pr.x, y: pr.y, angle: 0, dur: 0.12, color: w.color });
+        }
+      });
       this.addShake(0.35);
     } else {
       const sp = w.special;
@@ -793,21 +803,46 @@ class Game {
     let dmg = base + m.bonusAttackDamage + (this.metaAtk || 0);
     let kb = knockback;
     if (m.poseidon.active) { dmg += m.poseidon.impactDamage; kb *= m.poseidon.knockbackMul; }
-    // 阿尔忒弥斯暴击
+    // 暴击（阿尔忒弥斯 + 嗜血狩猎契约）
+    let critChance = m.artemis.active ? m.artemis.chance : 0;
+    if (m.duoHunt.active) critChance += m.duoHunt.critBonus;
     let crit = false;
-    if (m.artemis.active && Math.random() < m.artemis.chance) { dmg *= m.artemis.mult; crit = true; }
+    if (critChance > 0 && Math.random() < critChance) { dmg *= (m.artemis.active ? m.artemis.mult : 1.6); crit = true; }
+    // 契约·额外伤害（针对已带状态的敌人）
+    if (m.duoFrostfire.active && en.burnTimer > 0 && en.chillTimer > 0) dmg += m.duoFrostfire.bonus;
+    if (m.duoToxin.active && en.burnTimer > 0 && en.weakTimer > 0) dmg += m.duoToxin.bonus;
+
     en.takeDamage(dmg, fromX, fromY, kb, hitstun);
     if (m.ares.active) en.applyBleed(m.ares.dps, m.ares.duration);
     if (m.aphrodite.active) en.applyWeak(m.aphrodite.weakMul, m.aphrodite.duration);
     if (m.hestia.active) en.applyBurn(m.hestia.dps, m.hestia.duration);
     if (m.dionysus.active) en.applyBurn(m.dionysus.dps, m.dionysus.duration);
     if (m.demeter.active) en.applyChill(m.demeter.slowMul, m.demeter.duration);
+    if (crit && m.duoHunt.active) en.applyBleed(m.duoHunt.bleedDps, 3);
+
     this.effects.spawn('hit', { x: en.x, y: en.y, angle: Math.atan2(en.y - fromY, en.x - fromX), dur: 0.2, color: hitColor || Config.Palette.spark });
     this.effects.spawn('dmg', { x: en.x, y: en.y - en.radius - 6, text: (crit ? '✦' : '') + Math.round(dmg), vy: -70, dur: crit ? 0.75 : 0.6, color: crit ? '#9fe6a0' : Config.Palette.olympusGoldLight });
     if (crit) this.addShake(0.12);
     this.player.gainEnergy(Config.player.energyPerHit);
     this.audio.play('hit');
     if (m.zeus.active && (!opts || opts.chain !== false)) this._chainLightning(en, m.zeus);
+    // 契约·风暴之心：几率引爆雷暴
+    if (m.duoStorm.active && (!opts || opts.chain !== false) && Math.random() < m.duoStorm.chance) this._duoStorm(en.x, en.y, m.duoStorm);
+  }
+
+  // 契约·风暴之心：在命中点引爆范围雷暴
+  _duoStorm(x, y, ds) {
+    this.effects.spawn('shock', { x, y, maxR: ds.radius, dur: 0.35, color: '#8fd0ff' });
+    this.effects.spawn('lightning', { x, y: y - ds.radius, x2: x, y2: y, dur: 0.18, color: Config.Palette.olympusGoldLight });
+    for (let i = 0; i < this.enemies.length; i++) {
+      const e = this.enemies[i];
+      if (!e.isAlive()) continue;
+      if (dist(e.x, e.y, x, y) <= ds.radius + e.radius) {
+        e.takeDamage(ds.damage, x, y, 60, 0.05);
+        this.effects.spawn('dmg', { x: e.x, y: e.y - e.radius - 6, text: Math.round(ds.damage), vy: -60, dur: 0.5, color: '#8fd0ff' });
+      }
+    }
+    this.addShake(0.28);
   }
 
   // ---- 刷怪导演（随击败 Boss 数 waveLevel 提升强度）----
@@ -1142,14 +1177,14 @@ class Game {
     const startY = (ch - total) / 2 + 20;
     const x = (cw - cardW) / 2;
     return choices.map((c, i) => ({
-      def: c.def, nextLevel: c.nextLevel,
+      def: c.def, nextLevel: c.nextLevel, rarity: c.rarity || 0, isDuo: !!c.isDuo,
       rect: { x, y: startY + i * (cardH + gap), w: cardW, h: cardH }
     }));
   }
 
-  _applyBoon(id) {
+  _applyBoon(choice) {
     const prevMaxHp = this.player.maxHp;
-    this.boons.add(id);
+    this.boons.add(choice.def.id, choice.rarity);
     const m = this.boons.mods;
     this.player.maxHp = this._baseMaxHp() + m.bonusMaxHp;
     this.player.maxStamina = Config.player.maxStamina + this.meta.stamBonus() + m.bonusMaxStamina;
@@ -1670,14 +1705,18 @@ class Game {
     const r = c.rect;
     const def = c.def;
     const g = GODS[def.god];
-    // 指定金色的祝福（如「惊涛裂岸」「冥王之力」）用金色描边与文案
-    const accent = def.gold ? P.olympusGold : g.accent;
+    const rar = RARITIES[c.rarity || 0];
+    const effLevel = c.nextLevel + (c.isDuo ? 0 : rar.bonus);
+    // 描边按品阶/契约着色；契约用金色
+    const accent = c.isDuo ? P.olympusGold : rar.color;
     const titleColor = def.gold ? P.olympusGoldLight : g.color;
-    ctx.fillStyle = 'rgba(24,14,38,0.96)';
+
+    ctx.fillStyle = c.isDuo ? 'rgba(34,22,10,0.96)' : 'rgba(24,14,38,0.96)';
     ctx.fillRect(r.x, r.y, r.w, r.h);
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = c.isDuo ? 3.5 : 2.5;
     ctx.strokeStyle = accent;
     ctx.strokeRect(r.x, r.y, r.w, r.h);
+
     const badgeX = r.x + 40, badgeY = r.y + r.h / 2;
     ctx.beginPath();
     ctx.arc(badgeX, badgeY, 26, 0, Math.PI * 2);
@@ -1686,24 +1725,34 @@ class Game {
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = accent;
     ctx.stroke();
-    ctx.fillStyle = titleColor;
+    ctx.fillStyle = c.isDuo ? P.olympusGoldLight : titleColor;
     ctx.font = 'bold 24px serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(def.short, badgeX, badgeY + 1);
+
     const tx = r.x + 78;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = titleColor;
-    ctx.font = 'bold 19px serif';
-    ctx.fillText(def.name + '  Lv.' + c.nextLevel, tx, r.y + 16);
-    ctx.fillStyle = def.gold ? 'rgba(245,197,66,0.7)' : 'rgba(243,233,210,0.55)';
-    ctx.font = '12px sans-serif';
-    ctx.fillText(g.name + ' · ' + def.slot, tx, r.y + 40);
+    ctx.fillStyle = c.isDuo ? P.olympusGoldLight : titleColor;
+    ctx.font = 'bold 18px serif';
+    ctx.fillText(def.name + (def.maxLevel > 1 ? '  Lv.' + c.nextLevel : ''), tx, r.y + 14);
+
+    // 品阶 / 契约标签（右上角）
+    ctx.textAlign = 'right';
+    ctx.fillStyle = accent;
+    ctx.font = 'bold 12px serif';
+    ctx.fillText(c.isDuo ? '★契约' : rar.name, r.x + r.w - 12, r.y + 14);
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = c.isDuo ? 'rgba(245,197,66,0.7)' : 'rgba(243,233,210,0.55)';
+    ctx.font = '11px sans-serif';
+    ctx.fillText(c.isDuo ? def.slot : (g.name + ' · ' + def.slot), tx, r.y + 38);
+
     ctx.fillStyle = def.gold ? P.olympusGoldLight : P.textLight;
     ctx.font = '13px sans-serif';
-    const lines = this._wrapText(ctx, def.desc(c.nextLevel), r.w - 92);
-    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], tx, r.y + 62 + i * 18);
+    const lines = this._wrapText(ctx, def.desc(effLevel), r.w - 92);
+    for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], tx, r.y + 60 + i * 17);
   }
 
   // 死亡结算：统计黑暗精华

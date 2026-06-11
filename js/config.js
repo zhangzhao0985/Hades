@@ -66,7 +66,7 @@ const Config = {
     maxEnergy: 100,         // 神怒能量上限
     energyPerHit: 3,        // 每次命中获得能量（积攒速度延长一倍）
     energyOnHurt: 4,        // 受击获得能量
-    autoLockDiameters: 4    // 自动锁敌最大距离 = 该值 × 角色身位(直径)
+    autoLockDiameters: 7    // 自动锁敌最大距离 = 该值 × 角色身位(直径)
   },
 
   // 神怒大招（满能量释放，全屏伤害）

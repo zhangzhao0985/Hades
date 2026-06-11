@@ -25,7 +25,7 @@ const WEAPONS = {
     windup: 0.02, active: 0.05, recover: 0.06, moveScale: 0.7,
     arrowSpeed: 780, arrowRange: 820, arrowRadius: 7,
     arrowKnockback: 120, hitstun: 0.12,
-    special: { name: '散射', cooldown: 2.6, arrows: 5, spread: Math.PI / 3.2, damage: 12, arrowKnockback: 150 },
+    special: { name: '三道扇射', cooldown: 2.6, arrows: 3, spread: Math.PI / 4, damage: 14, arrowKnockback: 150 },
     desc: '远程速射。特殊·散射：扇形齐射多支利箭。'
   }
 };
